@@ -12,6 +12,7 @@ loguru = "*"
 aiohttp = "*"
 requests = "*"
 selenium-wire = "*"
+pika = "*"
 
 [dev-packages]
 

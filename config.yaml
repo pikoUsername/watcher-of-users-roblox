@@ -1,0 +1,3 @@
+bot:
+    postgres_dsn: "postgres://postgres@postgres/localhost:8000/postgres"
+    rabbitmq_dsn: "localhost:5672"

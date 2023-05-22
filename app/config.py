@@ -5,7 +5,9 @@ from pydantic import BaseSettings, SecretStr
 
 
 class Settings(BaseSettings):
-    roblox_token: str
+    db_dsn: str
+    db_tokens_table: str
+    queue_dsn: str
 
     user_agent: str = "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64)" \
                       "AppleWebKit/537.36 (KHTML, like Gecko)" \

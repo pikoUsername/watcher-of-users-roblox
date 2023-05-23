@@ -9,11 +9,14 @@ class Settings(BaseSettings):
     db_tokens_table: str
     queue_dsn: str
 
+    window_size: str = "1920,1080"
+
     user_agent: str = "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64)" \
                       "AppleWebKit/537.36 (KHTML, like Gecko)" \
                       "Chrome/87.0.4280.141 Safari/537.36"
 
     debug: bool = True
+    browser: str = "Chrome"
 
     loggers: List[str] = []
 

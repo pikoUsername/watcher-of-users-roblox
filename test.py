@@ -1,19 +1,27 @@
-import os
 
-from aiohttp import ClientSession
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service as ChromeService
+
+from selenium.webdriver.common.by import By
+from webdriver_manager.chrome import ChromeDriverManager
 
 
-async def main():
-    from dotenv import load_dotenv
-    load_dotenv()
+def main():
+    opts = webdriver.ChromeOptions()
+    opts.add_argument("--window-size=%s" % '1920,1080')
+    opts.add_argument('--no-sandbox')
 
-    cookies = {".ROBLOSECURITY": os.environ["ROBLOX_TOKEN"]}
-    async with ClientSession(cookies=cookies) as session:
-        home = await session.get("https://www.roblox.com/home")
-        text = home.text()
+    driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager(path="./drivers/").install()), options=opts)
+    driver.get("https://www.google.com")
 
+    try:
+        x = driver.find_element(By.ID, "fuck")
+    except Exception:
+        print("HERE")
+        raise
+
+    while 1:
+        pass
 
 if __name__ == "__main__":
-    import asyncio
-
-    asyncio.run(main())
+    main()

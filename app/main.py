@@ -2,8 +2,8 @@ import asyncpg
 from aiohttp import ClientSession
 from dotenv import load_dotenv
 from selenium.webdriver.chrome.service import Service as ChromeService
-# from seleniumwire import webdriver
-from selenium import webdriver
+from seleniumwire import webdriver
+# from selenium import webdriver
 from loguru import logger
 from webdriver_manager.chrome import ChromeDriverManager
 import pika
@@ -12,15 +12,24 @@ from .log import configure_logging
 from .config import Settings, get_settings
 from . import sequences
 from .puller import RabbitNotifier
-from .services import fetch_active_tokens
+from .services import fetch_active_tokens, create_tokens_table
 
 
 def get_driver(settings: Settings) -> webdriver.Chrome:
-    opts = webdriver.ChromeOptions()
-    agent = settings.user_agent
-    opts.add_argument(agent)
+    if settings.browser.lower() == "chrome":
+        opts = webdriver.ChromeOptions()
+        agent = settings.user_agent
+        opts.add_argument(agent)
+        opts.add_argument("--headless")
+        opts.add_argument("--window-size=%s" % settings.window_size)
+        opts.add_argument('--no-sandbox')
 
-    driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager(path="./drivers/").install()), options=opts)
+        driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager(path="./drivers/").install()), options=opts)
+    elif settings.browser.lower() == "safari":
+        # нужно установить тест браузер самостоятельно
+        driver = webdriver.Safari(executable_path="./drivers/")
+    else:
+        raise ValueError("Browser is not supported")
 
     logger.info("Driver has been started")
 
@@ -35,12 +44,13 @@ async def second_main():
     configure_logging(config.loggers)
 
     browser = get_driver(config)
-    creds = pika.PlainCredentials(username="guest", password="guest")
-    params = pika.ConnectionParameters(host="localhost", port='5672', credentials=creds)
-    connection = pika.BlockingConnection(params)
+    url = pika.URLParameters(config.queue_dsn)
+    connection = pika.BlockingConnection(url)
     notifier = RabbitNotifier(conn=connection)
     # i dont want to make another abstraction to this
     pool = await asyncpg.create_pool(config.db_dsn)
+
+    await create_tokens_table(pool, config.db_tokens_table)
 
     tokens = await fetch_active_tokens(pool, config.db_tokens_table)
     if not tokens:

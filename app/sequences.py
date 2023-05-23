@@ -4,6 +4,7 @@ from typing import Optional
 from aiohttp import ClientSession
 from asyncpg import Pool
 from loguru import logger
+from selenium.common import NoSuchElementException
 from selenium.webdriver import Chrome
 from selenium.webdriver.common.by import By
 
@@ -81,6 +82,18 @@ class UrlHandler(IListener):
         token = driver.get_cookie(ROBLOX_TOKEN_KEY)
         await mark_as_spent(self._pool, token, self.config.db_tokens_table)
 
+    async def change_token(self, driver) -> None:
+        loop = self.loop
+
+        # marks the current token as spent
+        loop.run_until_complete(self.mark_as_spent(driver))
+        driver.delete_cookie(name=ROBLOX_TOKEN_KEY)
+        token = loop.run_until_complete(self.get_new_token())
+        if not token:
+            logger.info("OUT OF TOKENS")
+            return
+        set_token(driver, token)
+
     def __call__(self, data: dict):
         url = data.pop("url")
         driver = self.driver
@@ -88,22 +101,23 @@ class UrlHandler(IListener):
 
         # предпологается что бразуер уже авторизорван
         driver.get(url)
-        robux = self.loop.run_until_complete(self.get_robux_count(driver))
+        robux = loop.run_until_complete(self.get_robux_count(driver))
         cost = driver.find_element(By.CLASS_NAME, "text-robux-lg")
         if cost > robux:
             # it can't buy this battlepass
             return
         if robux < 5:
-            # marks the current token as spent
-            loop.run_until_complete(self.mark_as_spent(driver))
-            driver.delete_cookie(name=ROBLOX_TOKEN_KEY)
-            token = loop.run_until_complete(self.get_new_token())
-            if not token:
-                logger.info("OUT OF TOKENS")
-                return
-            set_token(driver, token)
+            self.change_token(driver)
         # finds a buy button element
         btn = driver.find_element(By.CLASS_NAME, "PurchaseButton")
         # HERE IT'S IT BUYS GAMEPASS
         btn.click()
-        logger.info(f"Purchased gamepass for {cost} robuxes")
+
+        try:
+            confirm_btn = driver.find_element(By.ID, "confirm-btn")
+        except NoSuchElementException:
+            logger.info("Gamepass has been already bought")
+        else:
+            confirm_btn.click()
+
+            logger.info(f"Purchased gamepass for {cost} robuxes")

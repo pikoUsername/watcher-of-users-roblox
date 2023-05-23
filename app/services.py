@@ -30,3 +30,11 @@ async def mark_as_spent(pool: Pool, token: str, model_name: str) -> None:
         conn: Connection
         async with conn.transaction():
             await conn.execute(f"UPDATE {model_name} SET is_active = false WHERE token = $1", token)
+
+
+async def create_tokens_table(pool: Pool, model_name: str) -> None:
+    async with pool.acquire() as conn:
+        conn: Connection
+        async with conn.transaction():
+            await conn.execute(f"CREATE TABLE IF NOT EXISTS {model_name} ("
+                               f"id SERIAL PRIMARY KEY, token TEXT, is_active BOOLEAN DEFAULT true);")

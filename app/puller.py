@@ -19,7 +19,7 @@ class BaseNotifier(Notifier):
         self._on_shutdown = []
         self.error_handlers = []
 
-        self.add_on_shutdown(partial(self.close, self=self))
+        self.add_on_shutdown(partial(self.close, self))
 
     def add_listener(self, listener: ListenerType):
         self._listeners.append(listener)

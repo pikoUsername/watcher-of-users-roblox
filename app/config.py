@@ -3,6 +3,8 @@ from typing import List
 
 from pydantic import BaseSettings, SecretStr
 
+from app.consts import DEFAULT_QUEUE_NAME, EXHANGE_DEFAULT_NAME
+
 
 class Settings(BaseSettings):
     db_dsn: str
@@ -10,6 +12,9 @@ class Settings(BaseSettings):
     queue_dsn: str
 
     window_size: str = "1920,1080"
+
+    queue_name: str = DEFAULT_QUEUE_NAME
+    exchange_name: str = EXHANGE_DEFAULT_NAME
 
     user_agent: str = "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64)" \
                       "AppleWebKit/537.36 (KHTML, like Gecko)" \

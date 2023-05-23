@@ -1,9 +1,12 @@
+import os
 
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service as ChromeService
+from dotenv import load_dotenv
 
 from selenium.webdriver.common.by import By
 from webdriver_manager.chrome import ChromeDriverManager
+import pika
 
 
 def main():
@@ -23,5 +26,28 @@ def main():
     while 1:
         pass
 
+
+def second_main():
+    load_dotenv()
+
+    params = pika.URLParameters(os.environ["queue_dsn"])
+    conn = pika.BlockingConnection(params)
+
+    channel = conn.channel()
+
+    channel.queue_declare(os.environ["queue_name"])
+
+    print(os.environ["queue_name"], ", Published a data")
+
+    channel.basic_publish(
+        exchange="url",
+        routing_key=os.environ["queue_name"],
+        body=b'{"url": "https://www.roblox.com/game-pass/19962432/unnamed/"}',
+        properties=pika.BasicProperties(content_type="application/json", delivery_mode=pika.DeliveryMode.Transient),
+    )
+
+    conn.close()
+
+
 if __name__ == "__main__":
-    main()
+    second_main()

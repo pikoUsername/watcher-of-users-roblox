@@ -1,4 +1,5 @@
-from typing import Sequence
+from typing import Sequence, Dict, Any, List
+from urllib.parse import urlparse
 
 from asyncpg import Pool, Record, Connection
 
@@ -38,3 +39,18 @@ async def create_tokens_table(pool: Pool, model_name: str) -> None:
         async with conn.transaction():
             await conn.execute(f"CREATE TABLE IF NOT EXISTS {model_name} ("
                                f"id SERIAL PRIMARY KEY, token TEXT, is_active BOOLEAN DEFAULT true);")
+
+
+def convert_browser_cookies_to_aiohttp(cookies: List[Dict[str, Any]]) -> Dict[str, Any]:
+    result = {}
+    for cookie in cookies:
+        name = cookie["name"]
+        value = cookie["value"]
+        result[name] = value
+    return result
+
+
+def extract_user_id_from_profile_url(url: str) -> int:
+    uri = urlparse(url).path[1:]
+    parts = uri.split('/')
+    return int(parts[1])

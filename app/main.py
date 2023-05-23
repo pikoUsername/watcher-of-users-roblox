@@ -14,6 +14,9 @@ from . import sequences
 from .puller import RabbitNotifier
 from .services import fetch_active_tokens, create_tokens_table
 
+import nest_asyncio
+nest_asyncio.apply()
+
 
 def get_driver(settings: Settings) -> webdriver.Chrome:
     if settings.browser.lower() == "chrome":
@@ -42,22 +45,27 @@ async def second_main():
     config = get_settings()
 
     configure_logging(config.loggers)
-
-    browser = get_driver(config)
     url = pika.URLParameters(config.queue_dsn)
     connection = pika.BlockingConnection(url)
-    notifier = RabbitNotifier(conn=connection)
+    notifier = RabbitNotifier(conn=connection, queue_name=config.queue_name, exchange_name=config.exchange_name)
     # i dont want to make another abstraction to this
     pool = await asyncpg.create_pool(config.db_dsn)
 
+    logger.info("Pool has been created")
+
     await create_tokens_table(pool, config.db_tokens_table)
+
+    logger.info("Created Tokens table")
 
     tokens = await fetch_active_tokens(pool, config.db_tokens_table)
     if not tokens:
         logger.error("In the database has to be at least one active token!")
-        browser.quit()
         return
     token = tokens[0]
+
+    logger.info("First token is taken")
+
+    browser = get_driver(config)
 
     sequences.auth(browser, token)
     async with ClientSession() as session:
@@ -66,5 +74,3 @@ async def second_main():
         notifier.add_on_shutdown(lambda _: logger.info("Application has been shutdown"))
 
         notifier.run()
-
-        connection.close()

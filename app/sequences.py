@@ -2,19 +2,17 @@ import asyncio
 from typing import Optional
 
 from aiohttp import ClientSession
-from asyncpg import Pool
 from loguru import logger
 from selenium.common import NoSuchElementException
 from selenium.webdriver import Chrome
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support.wait import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
 
-from .config import Settings, get_settings
-from .abc import IListener
-from .services import set_token, fetch_active_tokens, mark_as_spent, convert_browser_cookies_to_aiohttp, \
-    extract_user_id_from_profile_url
-from .consts import ROBLOX_TOKEN_KEY
+from app.config import Settings, get_settings
+from app.abc import IListener
+from app.connector import BasicDBConnector
+from app.services import set_token, convert_browser_cookies_to_aiohttp, \
+    extract_user_id_from_profile_url, TokenService
+from app.consts import ROBLOX_TOKEN_KEY, TOKEN_RECURSIVE_CHECK
 
 
 def auth(browser: Chrome, token: str):
@@ -38,15 +36,24 @@ class UrlHandler(IListener):
     """
     Основной хендлер всех запросов,
 
-    Не слишком элегантно но сойдет
+    Очень грязный код
     """
-    def __init__(self, driver: Chrome, pool: Pool, session: ClientSession, config: Optional[Settings] = None, loop=None):
+    def __init__(
+            self,
+            driver: Chrome,
+            conn: BasicDBConnector,
+            session: ClientSession,
+            config: Optional[Settings] = None,
+            loop=None
+    ) -> None:
         self.config = config or get_settings()
         self.driver = driver
         self.current_token = ""
         self.loop = loop or asyncio.get_event_loop()
         self._session = session
-        self._pool = pool
+        self._conn = conn
+
+        self.token_service = TokenService.get_current()
 
     async def get_robux_count(self, driver: Chrome):
         # use it to get user_id
@@ -66,7 +73,7 @@ class UrlHandler(IListener):
                 return
         return self.get_robux_by_uid(driver, user_id)
 
-    async def get_robux_by_uid(self, driver: Chrome, user_id: int) -> None:
+    async def get_robux_by_uid(self, driver: Chrome, user_id: int) -> int:
         cookies = driver.get_cookies()
         cookies = convert_browser_cookies_to_aiohttp(cookies)
 
@@ -79,7 +86,7 @@ class UrlHandler(IListener):
 
             assert resp.status == 200
 
-            return (await resp.json()).get("robux")
+            return int((await resp.json()).get("robux"))
 
     async def get_new_token(self) -> Optional[str]:
         """
@@ -87,14 +94,14 @@ class UrlHandler(IListener):
 
         :return:
         """
-        tokens = await fetch_active_tokens(self._pool, self.config.db_tokens_table)
+        tokens = await self.token_service.fetch_active_tokens()
         if not tokens:
             return ""
         return tokens[0]
 
     async def mark_as_spent(self, driver) -> None:
         token = driver.get_cookie(ROBLOX_TOKEN_KEY)
-        await mark_as_spent(self._pool, token, self.config.db_tokens_table)
+        await self.token_service.mark_as_spent(token)
 
     async def change_token(self, driver) -> None:
         loop = self.loop
@@ -107,11 +114,27 @@ class UrlHandler(IListener):
             logger.info("OUT OF TOKENS")
             return
         set_token(driver, token)
+        driver.refresh()
+
+    async def change_token_recursive(self, driver: Chrome, depth: int = TOKEN_RECURSIVE_CHECK):
+        if depth == 0:
+            raise RuntimeError("TOKENS CORRUPTED, WAITING FOR ACTIONS")
+        await self.change_token(driver)
+        if not self.check_page_for_valid_login(driver):
+            await self.change_token(driver)
+        await self.change_token_recursive(driver, depth - 1)
+
+    def check_page_for_valid_login(self, driver: Chrome) -> bool:
+        # finds a signup button, if yes, then it returns False
+        try:
+            driver.find_element(By.CLASS_NAME, "rbx-navbar-signup")
+        except NoSuchElementException:
+            return True
+        return False
 
     async def __call__(self, data: dict):
         url = data.pop("url")
         driver = self.driver
-        loop = self.loop
 
         # предпологается что бразуер уже авторизорван
         driver.get(url)
@@ -122,12 +145,12 @@ class UrlHandler(IListener):
         user_id = extract_user_id_from_profile_url(profile_url)
         robux = await self.get_robux_by_uid(driver, user_id)
         cost = driver.find_element(By.CLASS_NAME, "text-robux-lg")
-        print(cost.text, f"Robuxes {robux}")
         if int(cost.text) > robux:
             # it can't buy this battlepass
             return
         if robux < 5:
-            await self.change_token(driver)
+            await self.change_token_recursive(driver)
+
         # finds a buy button element
         try:
 

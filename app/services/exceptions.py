@@ -1,0 +1,4 @@
+
+class SkipException(Exception):
+    pass
+

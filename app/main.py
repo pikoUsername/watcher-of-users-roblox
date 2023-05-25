@@ -1,4 +1,3 @@
-from aiohttp import ClientSession
 from dotenv import load_dotenv
 from loguru import logger
 
@@ -6,7 +5,6 @@ from app.connector import URLConsumer
 from app.log import configure_logging
 from app.config import get_settings
 from app import sequences
-from app.services import TokenService, get_driver, get_db_conn
 from app.connector import ReconnectingURLConsumer
 
 import nest_asyncio
@@ -19,41 +17,23 @@ async def main():
     config = get_settings()
 
     configure_logging(config.loggers)
-    queue_conn_args = {
+    kw = {
         "amqp_url": config.queue_dsn,
         "queue": config.queue_name,
         "exchange": config.exchange_name,
+        "routing": config.queue_name,
+        "workflow_data": {"settings": config}
     }
 
-    root_consumer = URLConsumer(**queue_conn_args)
+    root_consumer = URLConsumer(**kw)
     consumer = ReconnectingURLConsumer(
         consumer=root_consumer,
-        **queue_conn_args,
+        **kw,
     )
-    conn = await get_db_conn(config)
-
-    logger.info("Pool has been created")
-
-    token_service = TokenService(conn, config.db_tokens_table)
-
-    await token_service.create_tokens_table()
 
     logger.info("Created Tokens table")
 
-    tokens = await token_service.fetch_active_tokens()
-    if not tokens:
-        logger.error("In the database has to be at least one active token!")
-        return
-    token = tokens[0]
+    root_consumer.add_listener(sequences.DBHandler())
+    root_consumer.add_listener(sequences.UrlHandler())
 
-    logger.info("First token is taken")
-
-    browser = get_driver(config)
-
-    sequences.auth(browser, token)
-    async with ClientSession() as session:
-        root_consumer.add_on_startup(lambda _: logger.info("Bot ready to accept data"))
-        root_consumer.add_listener(sequences.UrlHandler(driver=browser, conn=conn, session=session))
-        root_consumer.add_on_shutdown(lambda _: logger.info("Bot is shutting down"))
-
-        consumer.run()
+    consumer.run()

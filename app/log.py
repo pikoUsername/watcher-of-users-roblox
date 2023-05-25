@@ -35,6 +35,6 @@ def configure_logging(loggers: List[str], logging_level: int = logging.INFO) -> 
     logger.configure(
         handlers=[
             dict(sink=sys.stderr, level=logging_level),
-            dict(sink="logs/logs.log", enqueue=True, serialize=True),
+            dict(sink="logs/logs.log", enqueue=True, serialize=True, rotation="20 MB"),
         ],
     )

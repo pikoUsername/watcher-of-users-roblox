@@ -1,33 +1,19 @@
 import abc
+import contextvars
 import json
 import functools
 import time
-from typing import Union, List, Optional, Dict, Any
-import sqlite3
+from multiprocessing.pool import ThreadPool
+from typing import Union, List, Optional
 
 import pika
-from asyncpg import Pool, Connection, Record
 from pika.adapters.asyncio_connection import AsyncioConnection
 from pika.exchange_type import ExchangeType
 from loguru import logger
 
-from app.abc import ListenerType
-from app.consts import DEFAULT_QUEUE_NAME, EXHANGE_DEFAULT_NAME
-from app.services import run_listeners
-
-
-class BasicConsumer(abc.ABC):
-    @abc.abstractmethod
-    def connect(self):
-        pass
-
-    @abc.abstractmethod
-    def run(self):
-        pass
-
-    @abc.abstractmethod
-    def stop(self):
-        pass
+from app.services.abc import ListenerType, BasicConsumer, IListener
+from app.consts import DEFAULT_QUEUE_NAME, DEFAULT_EXCHANGE_NAME, DEFAULT_ROUTING_KEY, DEFAULT_THREADS_COUNT
+from app.services.helpers import run_listeners
 
 
 # COPY PASTE FROM https://github.com/pika/pika/blob/main/examples/asyncio_consumer_example.py
@@ -47,15 +33,16 @@ class ExampleConsumer(BasicConsumer):
     # EXCHANGE = 'message'
     EXCHANGE_TYPE = ExchangeType.direct
     # QUEUE = 'text'
-    ROUTING_KEY = 'example.text'
+    # ROUTING_KEY = 'example.text'
 
-    def __init__(self, amqp_url, exchange: str = EXHANGE_DEFAULT_NAME, queue: str = DEFAULT_QUEUE_NAME):
+    def __init__(self, amqp_url, exchange: str = DEFAULT_EXCHANGE_NAME, queue: str = DEFAULT_QUEUE_NAME, routing: str = DEFAULT_ROUTING_KEY):
         """Create a new instance of the consumer class, passing in the AMQP
         URL used to connect to RabbitMQ.
 
         :param str amqp_url: The AMQP url to connect with
 
         """
+        self.ROUTING_KEY = routing
         self.EXCHANGE = exchange
         self.QUEUE = queue
 
@@ -356,7 +343,7 @@ class ExampleConsumer(BasicConsumer):
         :param int delivery_tag: The delivery tag from the Basic.Deliver frame
 
         """
-        logger.info('Acknowledging message %s', delivery_tag)
+        logger.info(f'Acknowledging message {delivery_tag}', )
         self._channel.basic_ack(delivery_tag)
 
     def stop_consuming(self):
@@ -425,12 +412,24 @@ class ExampleConsumer(BasicConsumer):
 
 
 class URLConsumer(ExampleConsumer):
+    """
+    Не умеет работать в многопоточном режиме.
+    Является простым обработчиком оберткой для UrlHandler-а
+    """
     def __init__(self, *args, **kwargs):
-        self._on_startup: List[ListenerType] = []
-        self._on_shutdown: List[ListenerType] = []
         self._listeners: List[ListenerType] = []
 
+        self.workflow_data = kwargs.pop("workflow_data", {})
+
+        self.workflow_data.update(data=self.workflow_data)
+
         super().__init__(*args, **kwargs)
+
+    def emit_startup(self, workflow: dict):
+        run_listeners(workflow, self._listeners, "setup")
+
+    def emit_shutdown(self, workflow: dict):
+        run_listeners(workflow, self._listeners, "close")
 
     def handle_message(self, body: Union[bytes, str]) -> None:
         data = json.loads(body)
@@ -438,26 +437,61 @@ class URLConsumer(ExampleConsumer):
 
         logger.info(f"Handling body, with url: {url}")
 
-        run_listeners(data={"url": url}, listeners=self._listeners)
+        self.workflow_data.update(url=url)
+
+        run_listeners(data=self.workflow_data, listeners=self._listeners)
 
     def close_connection(self):
-        run_listeners(data={}, listeners=self._on_shutdown)
+        self.emit_shutdown(self.workflow_data)
 
         super().close_connection()
 
     def run(self):
-        run_listeners(data={}, listeners=self._on_startup)
+        self.emit_startup(self.workflow_data)
 
         super().run()
 
     def add_listener(self, listener: ListenerType):
         self._listeners.append(listener)
 
-    def add_on_startup(self, listener: ListenerType):
-        self._on_startup.append(listener)
 
-    def add_on_shutdown(self, listener: ListenerType):
-        self._on_shutdown.append(listener)
+class MultiThreadedConsumer(URLConsumer, IListener):
+    """
+    Является паралельной Версией URLConsumer,
+    которая имеет возможность поддерживать несколько тредов.
+
+    Работа класса:
+    Перераспределяет по принципу round-robin юрлы которые идут на обработку.
+
+    Каждый тред имеет свой workflow_data который можно использвать
+    для того что бы туда засунуть driver и использвать несколько
+    браузеров одновременно(ну там GIL не будет проблемой в основном).
+
+    TODO
+    """
+    def __init__(self, *args, **kwargs):
+        self._threads_count = kwargs.pop("threads_count", DEFAULT_THREADS_COUNT)
+        self._thread_pool = ThreadPool(self._threads_count, self.setup, )
+
+        self.workflow_data = contextvars.ContextVar("workflow_data", default={})
+
+        self.add_listener(self)
+
+        super().__init__(*args, **kwargs)
+
+    def setup(self, *args, **kwargs):
+        logger.info("Setting up threads")
+
+        pass
+
+    def close(self, *args, **kwargs):
+        pass
+
+    def handle_message(self, body: Union[bytes, str]) -> None:
+        self._thread_pool.apply(self.handle_message_in_thread, )
+
+    def __call__(self, *args, **kwargs):
+        pass
 
 
 class ReconnectingURLConsumer:
@@ -498,79 +532,3 @@ class ReconnectingURLConsumer:
         if self._reconnect_delay > 30:
             self._reconnect_delay = 30
         return self._reconnect_delay
-
-
-class BasicDBConnector(abc.ABC):
-    @abc.abstractmethod
-    async def execute(self, sql, *args, **kwargs) -> Optional[str]:
-        pass
-
-    @abc.abstractmethod
-    async def fetch(self, sql, *args, **kwargs) -> Dict[str, Any]:
-        pass
-
-    @abc.abstractmethod
-    async def fetchmany(self, sql, *args, **kwargs) -> List[Dict[str, Any]]:
-        pass
-
-
-class AsyncpgDBConnector(BasicDBConnector):
-    __slots__ = ("pool",)
-
-    def __init__(self, pool: Pool) -> None:
-        self.pool = pool
-
-    # noinspection PyTypeChecker
-    async def execute(self, sql, *args, **kwargs) -> Optional[str]:
-        pool = self.pool
-
-        async with pool.acquire() as conn:
-            conn: Connection
-            async with conn.transaction():
-                await conn.execute(sql, *args, **kwargs)
-
-    async def fetch(self, sql, *args, **kwargs) -> Dict[str, Any]:
-        pool = self.pool
-
-        async with pool.acquire() as conn:
-            conn: Connection
-            record: Record = await conn.fetchrow(sql, *args, **kwargs)
-            return record.items()
-
-    async def fetchmany(self, sql, *args, **kwargs) -> List[Dict[str, Any]]:
-        pool = self.pool
-
-        async with pool.acquire() as conn:
-            conn: Connection
-            records: List[dict] = await conn.fetch(sql, *args, **kwargs)
-
-        return records
-
-# noinspection PyArgumentList
-class SQLiteDBConnector(BasicDBConnector):
-    def __init__(self, conn: sqlite3.Connection) -> None:
-        self.conn = conn
-        self.conn.row_factory = self.dict_factory
-        self._cursor = None
-
-    @staticmethod
-    def dict_factory(cursor, row):
-        fields = [column[0] for column in cursor.description]
-        return {key: value for key, value in zip(fields, row)}
-
-    @property
-    def cursor(self) -> sqlite3.Cursor:
-        if self._cursor:
-            self._cursor = self.conn.cursor()
-        return self._cursor
-
-    async def execute(self, sql, *args, **kwargs) -> Optional[str]:
-        self.cursor.execute(sql, *args)
-        self.conn.commit()
-
-    async def fetch(self, sql, *args, **kwargs) -> Dict[str, Any]:
-        result: dict = self.cursor.fetchone(sql, *args)
-        return result
-
-    async def fetchmany(self, sql, *args, **kwargs) -> List[Dict[str, Any]]:
-        return self.cursor.fetchmany(sql, *args)

@@ -1,9 +1,8 @@
 from functools import lru_cache
 from typing import List
 
-from pydantic import BaseSettings, SecretStr
-
-from app.consts import DEFAULT_QUEUE_NAME, EXHANGE_DEFAULT_NAME
+from pydantic import BaseSettings
+from app.consts import DEFAULT_QUEUE_NAME, DEFAULT_EXCHANGE_NAME
 
 
 class Settings(BaseSettings):
@@ -14,7 +13,7 @@ class Settings(BaseSettings):
     window_size: str = "1920,1080"
 
     queue_name: str = DEFAULT_QUEUE_NAME
-    exchange_name: str = EXHANGE_DEFAULT_NAME
+    exchange_name: str = DEFAULT_EXCHANGE_NAME
 
     user_agent: str = "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64)" \
                       "AppleWebKit/537.36 (KHTML, like Gecko)" \

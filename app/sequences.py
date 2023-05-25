@@ -1,4 +1,5 @@
 import asyncio
+import time
 from typing import Optional
 
 from aiohttp import ClientSession
@@ -7,71 +8,86 @@ from selenium.common import NoSuchElementException
 from selenium.webdriver import Chrome
 from selenium.webdriver.common.by import By
 
-from app.config import Settings, get_settings
-from app.abc import IListener
-from app.connector import BasicDBConnector
-from app.services import set_token, convert_browser_cookies_to_aiohttp, \
-    extract_user_id_from_profile_url, TokenService
-from app.consts import ROBLOX_TOKEN_KEY, TOKEN_RECURSIVE_CHECK
+from app.config import Settings
+from app.services.abc import IListener, BasicDBConnector
+from app.services.db import get_db_conn
+from app.services.driver import set_token, convert_browser_cookies_to_aiohttp, \
+    extract_user_id_from_profile_url, get_driver
+from app.repos import TokenService
+from app.consts import ROBLOX_TOKEN_KEY, TOKEN_RECURSIVE_CHECK, ROBLOX_HOME_URL
 
 
 def auth(browser: Chrome, token: str):
     """
-    Redirects to home page
+    Just sets a token and refreshes the page
 
     :param browser:
     :param token:
     :return:
     """
-    browser.get("https://www.roblox.com/game-pass/19962432/unnamed")
-    browser.add_cookie({"name": ".ROBLOSECURITY", "value": token, "domain": "www.roblox.com"})
-    elemt = browser.find_element(By.CLASS_NAME, "rbx-navbar-login")
-    link = elemt.get_attribute("href")
-    # redirected to home page
-    browser.get(link)
-    logger.info("Passed Roblox registration")
+    browser.get(ROBLOX_HOME_URL)
+    set_token(browser, token)  # noqa
+    browser.refresh()
 
 
 class UrlHandler(IListener):
     """
     Основной хендлер всех запросов,
 
+    Он должен иметь в __init__ только самое необходимое!
+
     Очень грязный код
     """
-    def __init__(
-            self,
-            driver: Chrome,
-            conn: BasicDBConnector,
-            session: ClientSession,
-            config: Optional[Settings] = None,
-            loop=None
-    ) -> None:
-        self.config = config or get_settings()
-        self.driver = driver
+    def __init__(self) -> None:
+        # предпологается что мы будем работать в треде,
+        # так что все переменные будут установлены ТОЛЬКО в setup
+        # потому как в __init__ не принято делать инициализацию вешей
+        # которые требуют сложных действии, да URLHandler для каждого треда будет свой
+        # но лучше перестрахаватся
+        self.config: Optional[Settings] = None
+        self.driver: Optional[Chrome] = None
         self.current_token = ""
-        self.loop = loop or asyncio.get_event_loop()
-        self._session = session
-        self._conn = conn
+        self._session: Optional[ClientSession] = None
 
-        self.token_service = TokenService.get_current()
+        self.token_service: Optional[TokenService] = None
+        self.setupped = False
 
-    async def get_robux_count(self, driver: Chrome):
-        # use it to get user_id
-        url = "https://thumbnails.roblox.com/v1/batch"
-        cookies = driver.get_cookies()
-        cookies = convert_browser_cookies_to_aiohttp(cookies)
+    def setup(self, data: dict, conn: BasicDBConnector, settings: Settings, token_service: TokenService):
+        if self.setupped:
+            return
+        driver = get_driver(settings)
 
-        async with self._session.post(url, cookies=cookies) as resp:
-            assert resp.status == 200
+        logger.info("Driver has been set")
 
-            data = await resp.json()
+        data.update(driver=driver)
 
-            try:
-                user_id = data["data"]["targetId"]
-            except KeyError:
-                logger.info("Invalid payload", extra={"cookies": cookies})
-                return
-        return self.get_robux_by_uid(driver, user_id)
+        loop = asyncio.get_event_loop()
+
+        _task = loop.create_task(token_service.fetch_token())
+        token = loop.run_until_complete(_task)
+
+        logger.info("First token has been taken")
+
+        auth(driver, token)
+
+        cookies = convert_browser_cookies_to_aiohttp(driver.get_cookies())
+
+        self._session = ClientSession(cookies=cookies)
+        self.driver = driver
+
+        self.current_token = token
+        self.token_service = token_service
+
+        self.setupped = True
+
+    def close(self, driver: Chrome):
+        driver.quit()
+
+        loop = asyncio.get_event_loop()
+
+        loop.run_until_complete(self._session.close())
+
+        logger.info("Closing up...")
 
     async def get_robux_by_uid(self, driver: Chrome, user_id: int) -> int:
         cookies = driver.get_cookies()
@@ -88,28 +104,15 @@ class UrlHandler(IListener):
 
             return int((await resp.json()).get("robux"))
 
-    async def get_new_token(self) -> Optional[str]:
-        """
-        Выбирает рандомный свободный токен
-
-        :return:
-        """
-        tokens = await self.token_service.fetch_active_tokens()
-        if not tokens:
-            return ""
-        return tokens[0]
-
     async def mark_as_spent(self, driver) -> None:
         token = driver.get_cookie(ROBLOX_TOKEN_KEY)
         await self.token_service.mark_as_spent(token)
 
     async def change_token(self, driver) -> None:
-        loop = self.loop
-
         # marks the current token as spent
-        loop.run_until_complete(self.mark_as_spent(driver))
+        await self.mark_as_spent(driver)
         driver.delete_cookie(name=ROBLOX_TOKEN_KEY)
-        token = loop.run_until_complete(self.get_new_token())
+        token = await self.token_service.fetch_token()
         if not token:
             logger.info("OUT OF TOKENS")
             return
@@ -132,14 +135,12 @@ class UrlHandler(IListener):
             return True
         return False
 
-    async def __call__(self, data: dict):
-        url = data.pop("url")
-        driver = self.driver
-
+    async def __call__(self, driver: Chrome, url: str, settings: Settings):
         # предпологается что бразуер уже авторизорван
+        t = time.monotonic()
         driver.get(url)
-        driver.save_screenshot("screenshot.png")
-        # robux = await self.get_robux_count(driver)
+        if settings.debug:
+            driver.save_screenshot("screenshot.png")
         link = driver.find_element(By.CSS_SELECTOR, ".age-bracket-label > a.text-link")
         profile_url = link.get_attribute("href")
         user_id = extract_user_id_from_profile_url(profile_url)
@@ -155,7 +156,7 @@ class UrlHandler(IListener):
         try:
 
             btn = driver.find_element(By.CLASS_NAME, "PurchaseButton")
-            # HERE IT'S IT BUYS GAMEPASS
+            # HERE IT'S BUYS GAMEPASS
             btn.click()
 
             confirm_btn = driver.find_element(By.ID, "confirm-btn")
@@ -165,3 +166,23 @@ class UrlHandler(IListener):
             confirm_btn.click()
 
             logger.info(f"Purchased gamepass for {cost} robuxes")
+        logger.info(f"Execution Time: {(time.monotonic() - t)}")
+
+
+class DBHandler(IListener):
+    def setup(self, data: dict, settings: Settings):
+        loop = asyncio.get_event_loop()
+
+        conn = loop.run_until_complete(get_db_conn(settings))
+
+        token_service = TokenService.get_current(
+            no_error=True
+        ) or TokenService(conn, settings.db_tokens_table)
+
+        data.update(conn=conn, token_service=token_service)
+
+    def close(self, *args, **kwargs):
+        pass
+
+    def __call__(self, *args, **kwargs):
+        pass

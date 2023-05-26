@@ -1,9 +1,11 @@
 import abc
+import asyncio
 import contextvars
 import json
 import functools
+import threading
 import time
-from multiprocessing.pool import ThreadPool
+from multiprocessing.pool import ThreadPool, Pool
 from typing import Union, List, Optional, Callable
 
 import pika
@@ -492,19 +494,40 @@ class MultiThreadedConsumer(URLConsumer):
     """
     def __init__(self, *args, **kwargs):
         self._threads_count = kwargs.pop("threads_count", DEFAULT_THREADS_COUNT)
-        self._thread_pool = ThreadPool(self._threads_count, self.setup_thread)
 
-        self.workflow_data = contextvars.ContextVar(
+        self._local = threading.local()
+
+        self.threaded_workflow_data = contextvars.ContextVar(
             "workflow_data"
         )
         self.default_workflow_data = kwargs.get("workflow_data", {})
 
+        self._thread_pool = None
+
         super().__init__(*args, **kwargs)
 
-    def setup_thread(self, workflow_data: dict):
-        logger.info("Setting up threads")
+    def run(self):
+        # БАГ, РЕКОННЕКТ при ошибке пробует начать занаво, занаво, из за этого создается так много потоков!!!!
+        print("HERE")
+        self._thread_pool = ThreadPool(
+            1,
+        )
+        print("HERE1")
 
-        self.workflow_data.set(self.default_workflow_data)
+        # просто УЖАСНЫЙ код, если тут изменится API, то поломается все
+        super(ExampleConsumer, self).run()
+
+    @staticmethod
+    def setup_thread(local, workflow_data: contextvars.ContextVar, data: dict, listeners: List[ListenerType]):
+        # https://ru.stackoverflow.com/questions/787715/runtimeerror-there-is-no-current-event-loop-in-thread-thread-2
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        workflow_data.set(data)
+
+        run_listeners(workflow_data.get(), listeners, "setup")
+
+        local.listeners = listeners
 
     def close_connection(self):
         if self._thread_pool:
@@ -512,22 +535,26 @@ class MultiThreadedConsumer(URLConsumer):
             self._thread_pool.close()
         super().close_connection()
 
-    def handle_message_in_thread(self, workflow_data: contextvars.ContextVar, listeners: ListenerType):
-        try:
-            data = workflow_data.get()
-        except LookupError:
-            workflow_data.set({})
-            data = workflow_data.get()
-        self.setup_thread(data)
+    @staticmethod
+    def handle_message_in_thread(local, workflow_data: contextvars.ContextVar):
+        data = workflow_data.get()
 
-        run_listeners(workflow_data, listeners)
+        logger.info(data)
+
+        run_listeners(data, local.listeners)
 
     def handle_message(self, body: Union[bytes, str]) -> None:
+        wait = self._thread_pool.apply_async(
+            self.setup_thread,
+            (self._local, self.threaded_workflow_data, self.default_workflow_data, self._listeners)
+        )
+        wait.wait(10)
+
         result = self._thread_pool.apply_async(
             self.handle_message_in_thread,
-            (self, self.workflow_data, self._listeners),
+            (self._local, self.threaded_workflow_data),
         )
-        result.get()
+        result.get(10)
 
 
 class ReconnectingURLConsumer:
@@ -536,7 +563,7 @@ class ReconnectingURLConsumer:
 
     """
 
-    def __init__(self, amqp_url: str, consumer: BasicConsumer, **kwargs):
+    def __init__(self, amqp_url: str, consumer: ExampleConsumer, **kwargs):
         self._reconnect_delay = 0
         self._amqp_url = amqp_url
         self._consumer = consumer

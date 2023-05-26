@@ -186,16 +186,15 @@ class UrlHandler(IListener):
 
 
 class DBHandler(IListener):
-    def setup(self, data: dict, settings: Settings):
-        loop = asyncio.get_event_loop()
-
-        conn = loop.run_until_complete(get_db_conn(settings))
+    def setup(self, data: dict, settings: Settings, conn: BasicDBConnector):
+        if "token_service" in data:
+            return
 
         token_service = TokenService.get_current(
             no_error=True
         ) or TokenService(conn, settings.db_tokens_table)
 
-        data.update(conn=conn, token_service=token_service)
+        data.update(token_service=token_service)
 
     def close(self, *args, **kwargs):
         pass

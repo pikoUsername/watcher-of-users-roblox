@@ -1,0 +1,2 @@
+class GamePassAlreadyBought(Exception):
+    pass

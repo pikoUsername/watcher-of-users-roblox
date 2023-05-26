@@ -2,7 +2,7 @@ from functools import lru_cache
 from typing import List
 
 from pydantic import BaseSettings
-from app.consts import DEFAULT_QUEUE_NAME, DEFAULT_EXCHANGE_NAME
+from app.consts import DEFAULT_QUEUE_NAME, DEFAULT_EXCHANGE_NAME, DEFAULT_SEND_NAME
 
 
 class Settings(BaseSettings):
@@ -12,6 +12,7 @@ class Settings(BaseSettings):
 
     window_size: str = "1920,1080"
 
+    send_queue_name: str = DEFAULT_SEND_NAME
     queue_name: str = DEFAULT_QUEUE_NAME
     exchange_name: str = DEFAULT_EXCHANGE_NAME
 

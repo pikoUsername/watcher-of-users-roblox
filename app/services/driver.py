@@ -33,20 +33,8 @@ def get_driver(settings: "Settings") -> webdriver.Chrome:
         opts.add_argument('--no-sandbox')
 
         driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager(path="./drivers/").install()), options=opts)
-    # elif settings.browser.lower() == "firefox" and False:  # does not work, yet
-    #     opts = webdriver.FirefoxOptions()
-    #     agent = settings.user_agent
-    #     opts.add_argument(agent)
-    #     opts.headless = True
-    #     service = FirefoxService(GeckoDriverManager(version="v0.33.0", path="./drivers/").install())
-    #     if in_wsl():
-    #         driver = webdriver.Firefox(
-    #             service=service, firefox_binary=r"\mnt\c\Program Files\Mozilla Firefox\firefox.exe")
-    #     else:
-    #         # bug, with downloading the latest version of firefox
-    #         driver = webdriver.Firefox(service=service, options=opts)
     else:
-        raise ValueError("Browser is not supported")
+        raise NotImplementedError(f"{settings.browser} is not yet implemented")
 
     return driver
 

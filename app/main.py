@@ -1,11 +1,11 @@
 from dotenv import load_dotenv
 from loguru import logger
 
-from app.connector import URLConsumer
+from app.services.consumers import URLConsumer
 from app.log import configure_logging
 from app.config import get_settings
 from app import sequences
-from app.connector import ReconnectingURLConsumer
+from app.services.consumers import ReconnectingURLConsumer
 
 import nest_asyncio
 nest_asyncio.apply()
@@ -30,8 +30,6 @@ async def main():
         consumer=root_consumer,
         **kw,
     )
-
-    logger.info("Created Tokens table")
 
     root_consumer.add_listener(sequences.DBHandler())
     root_consumer.add_listener(sequences.UrlHandler())

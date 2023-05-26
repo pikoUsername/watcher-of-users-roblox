@@ -9,12 +9,15 @@ from selenium.webdriver import Chrome
 from selenium.webdriver.common.by import By
 
 from app.config import Settings
+from app.errors import GamePassAlreadyBought
 from app.services.abc import IListener, BasicDBConnector
 from app.services.db import get_db_conn
 from app.services.driver import set_token, convert_browser_cookies_to_aiohttp, \
     extract_user_id_from_profile_url, get_driver
 from app.repos import TokenService
 from app.consts import ROBLOX_TOKEN_KEY, TOKEN_RECURSIVE_CHECK, ROBLOX_HOME_URL
+from app.services.publisher import BasicMessageSender
+from app.schemas import ReturnSignal, SendError, StatusCodes
 
 
 def auth(browser: Chrome, token: str):
@@ -135,7 +138,7 @@ class UrlHandler(IListener):
             return True
         return False
 
-    async def __call__(self, driver: Chrome, url: str, settings: Settings):
+    async def __call__(self, driver: Chrome, url: str, settings: Settings, publisher: BasicMessageSender):
         # предпологается что бразуер уже авторизорван
         t = time.monotonic()
         driver.get(url)
@@ -162,10 +165,23 @@ class UrlHandler(IListener):
             confirm_btn = driver.find_element(By.ID, "confirm-btn")
         except NoSuchElementException:
             logger.info("Gamepass has been already bought")
+
+            data = ReturnSignal(
+                errors=[
+                    GamePassAlreadyBought("Already bought")
+                ],
+                status_code=StatusCodes.already_bought,
+            )
+
+            logger.debug("Sending back information about.")
         else:
             confirm_btn.click()
 
             logger.info(f"Purchased gamepass for {cost} robuxes")
+            data = ReturnSignal(status_code=StatusCodes.success)
+
+        publisher.send_message(data.dict())
+
         logger.info(f"Execution Time: {(time.monotonic() - t)}")
 
 
@@ -180,6 +196,23 @@ class DBHandler(IListener):
         ) or TokenService(conn, settings.db_tokens_table)
 
         data.update(conn=conn, token_service=token_service)
+
+    def close(self, *args, **kwargs):
+        pass
+
+    def __call__(self, *args, **kwargs):
+        pass
+
+
+class PublisherHandler(IListener):
+    def setup(self, data: dict, settings: Settings) -> None:
+        publisher = BasicMessageSender(
+            settings.queue_dsn,
+            queue=settings.send_queue_name,
+            exchange=settings.exchange_name,
+            routing=settings.send_queue_name,
+        )
+        data.update(publisher=publisher)
 
     def close(self, *args, **kwargs):
         pass

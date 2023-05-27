@@ -4,7 +4,7 @@ from app.services.abc import BasicDBConnector
 from app.services.mixins import ContextInstanceMixin
 
 
-class TokenService(ContextInstanceMixin):
+class TokenService(ContextInstanceMixin["TokenService"]):
     def __init__(self, conn: BasicDBConnector, model_name: str) -> None:
         self.conn = conn
 

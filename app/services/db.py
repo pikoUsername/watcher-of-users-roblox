@@ -41,6 +41,9 @@ class AsyncpgDBConnector(BasicDBConnector):
 
         return records
 
+    async def close(self):
+        await self.pool.close()
+
 
 # noinspection PyArgumentList
 class SQLiteDBConnector(BasicDBConnector):
@@ -70,6 +73,9 @@ class SQLiteDBConnector(BasicDBConnector):
 
     async def fetchmany(self, sql, *args, **kwargs) -> List[Dict[str, Any]]:
         return self.cursor.fetchmany(sql, *args)
+
+    async def close(self):
+        self.conn.close()
 
 
 async def get_db_conn(config: "Settings") -> BasicDBConnector:

@@ -1,5 +1,6 @@
 import asyncio
 import functools
+import json
 import logging
 import ssl
 import time
@@ -55,6 +56,7 @@ class BasicPikaClient:
     def connect(self):
         self._init_connection_parameters()
         self._connect()
+        self.setup()
 
     def _connect(self):
         tries = 0
@@ -85,8 +87,10 @@ class BasicPikaClient:
             self._connect()
 
     def close(self):
-        self.channel.close()
-        self.connection.close()
+        if not self.channel.is_closed:
+            self.channel.close()
+        if not self.connection.is_closed:
+            self.connection.close()
 
         logger.info("Sender connection closed")
 
@@ -107,7 +111,11 @@ class BasicPikaClient:
     def declare_exchange(self, exchange_name: str, exchange_type: str = "direct"):
         self.check_connection()
         self.channel.exchange_declare(
-            exchange=exchange_name, exchange_type=exchange_type
+            exchange=exchange_name,
+            exchange_type=exchange_type,
+            durable=True,
+            auto_delete=False,
+            passive=False,
         )
 
     def bind_queue(self, exchange_name: str, queue_name: str, routing_key: str):
@@ -123,12 +131,6 @@ class BasicPikaClient:
 
 
 class BasicMessageSender(BasicPikaClient):
-    def encode_message(self, body: Dict, encoding_type: str = "bytes"):
-        if encoding_type == "bytes":
-            return msgpack.packb(body)
-        else:
-            raise NotImplementedError
-
     def send_message(
         self,
         body: Dict,
@@ -140,17 +142,21 @@ class BasicMessageSender(BasicPikaClient):
             exchange_name = self.exchange
         if not routing_key:
             routing_key = self.routing
-        body = self.encode_message(body=body)
-        self.channel.basic_publish(
-            exchange=exchange_name,
-            routing_key=routing_key,
-            body=body,
-            properties=pika.BasicProperties(
-                delivery_mode=pika.spec.PERSISTENT_DELIVERY_MODE,
-                priority=headers.priority.value if headers else None,
-                headers=headers.dict() if headers else None,
-            ),
-        )
-        logger.debug(
-            f"Sent message. Exchange: {exchange_name}, Routing Key: {routing_key}, Body: {body[:128]}"
-        )
+        body = bytes(json.dumps(body), 'utf8')
+        if self.channel.is_closed:
+            self.channel.basic_publish(
+                exchange=exchange_name,
+                routing_key=routing_key,
+                body=body,
+                properties=pika.BasicProperties(
+                    delivery_mode=pika.spec.PERSISTENT_DELIVERY_MODE,
+                    priority=headers.priority.value if headers else None,
+                    headers=headers.dict() if headers else None,
+                    content_type="application/json",
+                ),
+            )
+            logger.debug(
+                f"Sent message. Exchange: {exchange_name}, Routing Key: {routing_key}, Body: {body[:128]}"
+            )
+        else:
+            logger.error("RETURN CHANNEL UNEXPECTEDLY CLOSED BY PEER, TRY TO INCREASE HEARTBEAT")

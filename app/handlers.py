@@ -17,7 +17,7 @@ from app.services.driver import set_token, convert_browser_cookies_to_aiohttp, \
 from app.repos import TokenService
 from app.consts import ROBLOX_TOKEN_KEY, TOKEN_RECURSIVE_CHECK, ROBLOX_HOME_URL
 from app.services.publisher import BasicMessageSender
-from app.schemas import ReturnSignal, SendError, StatusCodes
+from app.schemas import ReturnSignal, StatusCodes
 
 
 def auth(browser: Chrome, token: str):
@@ -55,7 +55,7 @@ class UrlHandler(IListener):
         self.token_service: Optional[TokenService] = None
         self.setupped = False
 
-    def setup(self, data: dict, conn: BasicDBConnector, settings: Settings, token_service: TokenService):
+    async def setup(self, data: dict, conn: BasicDBConnector, settings: Settings, token_service: TokenService):
         if self.setupped:
             return
         driver = get_driver(settings)
@@ -71,8 +71,6 @@ class UrlHandler(IListener):
 
         logger.info("First token has been taken")
 
-        auth(driver, token)
-
         cookies = convert_browser_cookies_to_aiohttp(driver.get_cookies())
 
         self._session = ClientSession(cookies=cookies)
@@ -80,6 +78,9 @@ class UrlHandler(IListener):
 
         self.current_token = token
         self.token_service = token_service
+
+        logger.info("Going to login")
+        auth(driver, token)
 
         self.setupped = True
 
@@ -141,6 +142,7 @@ class UrlHandler(IListener):
     async def __call__(self, driver: Chrome, url: str, settings: Settings, publisher: BasicMessageSender):
         # предпологается что бразуер уже авторизорван
         t = time.monotonic()
+        logger.info(f"Redirecting to {url}")
         driver.get(url)
         if settings.debug:
             driver.save_screenshot("screenshot.png")
@@ -157,7 +159,7 @@ class UrlHandler(IListener):
 
         # finds a buy button element
         try:
-
+            logger.debug("Getting purchase button")
             btn = driver.find_element(By.CLASS_NAME, "PurchaseButton")
             # HERE IT'S BUYS GAMEPASS
             btn.click()
@@ -167,9 +169,6 @@ class UrlHandler(IListener):
             logger.info("Gamepass has been already bought")
 
             data = ReturnSignal(
-                errors=[
-                    GamePassAlreadyBought("Already bought")
-                ],
                 status_code=StatusCodes.already_bought,
             )
 
@@ -179,42 +178,45 @@ class UrlHandler(IListener):
 
             logger.info(f"Purchased gamepass for {cost} robuxes")
             data = ReturnSignal(status_code=StatusCodes.success)
-
-        publisher.send_message(data.dict())
+        if data:
+            publisher.send_message(data.dict())
 
         logger.info(f"Execution Time: {(time.monotonic() - t)}")
 
 
 class DBHandler(IListener):
-    def setup(self, data: dict, settings: Settings, conn: BasicDBConnector):
-        if "token_service" in data:
-            return
+    async def setup(self, data: dict, settings: Settings):
+        conn = await get_db_conn(settings)
 
         token_service = TokenService.get_current(
             no_error=True
         ) or TokenService(conn, settings.db_tokens_table)
 
-        data.update(token_service=token_service)
+        data.update(token_service=token_service, conn=conn)
 
-    def close(self, *args, **kwargs):
-        pass
+    async def close(self, conn: BasicDBConnector):
+        await conn.close()
 
     def __call__(self, *args, **kwargs):
         pass
 
 
 class PublisherHandler(IListener):
-    def setup(self, data: dict, settings: Settings) -> None:
+    async def setup(self, data: dict, settings: Settings) -> None:
+        logger.info("Setting up basicMessageSender")
+
         publisher = BasicMessageSender(
             settings.queue_dsn,
             queue=settings.send_queue_name,
-            exchange=settings.exchange_name,
+            exchange=settings.send_queue_exchange_name,
             routing=settings.send_queue_name,
         )
+        publisher.connect()
+
         data.update(publisher=publisher)
 
-    def close(self, *args, **kwargs):
-        pass
+    def close(self, publisher: BasicMessageSender):
+        publisher.close()
 
     def __call__(self, *args, **kwargs):
         pass

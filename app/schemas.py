@@ -10,7 +10,6 @@ class StatusCodes(IntEnum):
     already_bought = 401
 
 
-
 class SendError(BaseModel):
     name: str
     info: str
@@ -18,7 +17,7 @@ class SendError(BaseModel):
 
 class ReturnSignal(BaseModel):
     errors: Optional[List[SendError]] = []
-    status: StatusCodes
+    status_code: StatusCodes
 
     @validator("errors")
     def validate_error(cls, value: List[Exception]):

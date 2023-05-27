@@ -38,6 +38,10 @@ class BasicDBConnector(abc.ABC):
     async def fetchmany(self, sql, *args, **kwargs) -> List[Dict[str, Any]]:
         pass
 
+    @abc.abstractmethod
+    async def close(self):
+        pass
+
 
 class BasicConsumer(abc.ABC):
     @abc.abstractmethod

@@ -2,6 +2,8 @@ import asyncio
 import inspect
 from platform import uname
 
+from loguru import logger
+
 from .exceptions import SkipException
 
 
@@ -25,10 +27,11 @@ def run_listeners(data, listeners, key: str = '__call__'):
             spec = _get_spec(func)
             workflow = _check_spec(spec, data)
             if asyncio.iscoroutinefunction(func):
-                loop = asyncio.get_running_loop()
+                loop = asyncio.get_event_loop()
 
-                task = loop.create_task(func(**workflow))
-                loop.run_until_complete(task)
+                logger.debug(f"{func} workflow: {workflow}")
+
+                loop.run_until_complete(func(**workflow))
             else:
                 func(**workflow)
 

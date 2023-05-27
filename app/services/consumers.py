@@ -5,14 +5,16 @@ import json
 import functools
 import threading
 import time
-from multiprocessing.pool import ThreadPool, Pool
-from typing import Union, List, Optional, Callable
+from multiprocessing.pool import ThreadPool
+from typing import Union, List, Callable
 
 import pika
 from pika.adapters.asyncio_connection import AsyncioConnection
+from pika.exceptions import StreamLostError
 from pika.exchange_type import ExchangeType
 from loguru import logger
 
+from app.config import get_settings
 from app.services.abc import ListenerType, BasicConsumer
 from app.consts import DEFAULT_THREADS_COUNT
 from app.services.helpers import run_listeners
@@ -59,7 +61,7 @@ class ExampleConsumer(BasicConsumer):
         self._consuming = False
         # In production, experiment with higher prefetch values
         # for higher consumer throughput
-        self._prefetch_count = 1
+        self._prefetch_count = 3
 
     def connect(self):
         """This method connects to RabbitMQ, returning the connection handle.
@@ -388,6 +390,7 @@ class ExampleConsumer(BasicConsumer):
         starting the IOLoop to block and allow the AsyncioConnection to operate.
 
         """
+        print("HERE")
         self._connection = self.connect()
         self._connection.ioloop.run_forever()
 
@@ -492,6 +495,10 @@ class MultiThreadedConsumer(URLConsumer):
 
     TODO
     """
+    # anti-pattern, it allows only one thread pool to exists
+    # in the whole application, you need manually delete to create a new one
+    _thread_pool_save: ThreadPool = None
+
     def __init__(self, *args, **kwargs):
         self._threads_count = kwargs.pop("threads_count", DEFAULT_THREADS_COUNT)
 
@@ -502,59 +509,80 @@ class MultiThreadedConsumer(URLConsumer):
         )
         self.default_workflow_data = kwargs.get("workflow_data", {})
 
-        self._thread_pool = None
-
         super().__init__(*args, **kwargs)
 
     def run(self):
-        # БАГ, РЕКОННЕКТ при ошибке пробует начать занаво, занаво, из за этого создается так много потоков!!!!
-        print("HERE")
-        self._thread_pool = ThreadPool(
-            1,
-        )
-        print("HERE1")
+        # TODO, необходимо создовать новый asyncpg.Pool для каждого потока
+        if not self._thread_pool_save:
+            # it will block until driver will be downloaded,
+            # and only then it allows pika to run
+            self._thread_pool_save = ThreadPool(
+                1,
+                initializer=self.setup_thread,
+                initargs=(self._local, self.threaded_workflow_data, self.default_workflow_data, self._listeners)
+            )
 
         # просто УЖАСНЫЙ код, если тут изменится API, то поломается все
-        super(ExampleConsumer, self).run()
+        super(URLConsumer, self).run()
 
     @staticmethod
-    def setup_thread(local, workflow_data: contextvars.ContextVar, data: dict, listeners: List[ListenerType]):
+    def setup_thread(local, workflow_data: contextvars.ContextVar, default_data: dict, listeners: List[ListenerType]):
         # https://ru.stackoverflow.com/questions/787715/runtimeerror-there-is-no-current-event-loop-in-thread-thread-2
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
+        logger.info(f"Executing in {threading.get_ident()}")
+
+        data = {}
+        # need to reference to itself!
+        if default_data:
+            data.update(default_data)
+        data.update(data=data)
+
+        run_listeners(data, listeners, "setup")
+
         workflow_data.set(data)
 
-        run_listeners(workflow_data.get(), listeners, "setup")
-
         local.listeners = listeners
+        local.workflow_data = workflow_data
 
     def close_connection(self):
-        if self._thread_pool:
-            self._thread_pool.join()
-            self._thread_pool.close()
-        super().close_connection()
+        # waits until ALL tasks complete,
+        # only then it tries to call close for every handler
+        time.sleep(2)
+        if self._thread_pool_save:
+
+            # then it will apply to all threads, in hope they will accept it
+            # with noone getting two iterable.
+            result = self._thread_pool_save.map_async(
+                self._close_thread, [self._local for _ in range(self._threads_count)],
+            )
+            result.wait(10)
+
+            self._thread_pool_save.close()
+        super(URLConsumer, self).close_connection()
 
     @staticmethod
-    def handle_message_in_thread(local, workflow_data: contextvars.ContextVar):
-        data = workflow_data.get()
+    def _close_thread(local):
+        data = local.workflow_data.get()
+        listeners = local.listeners
 
-        logger.info(data)
+        run_listeners(data, listeners, "close")
+
+    @staticmethod
+    def handle_message_in_thread(local):
+        logger.info(f"Handling in {threading.get_ident()} Thread")
+
+        data = local.workflow_data.get()
 
         run_listeners(data, local.listeners)
 
     def handle_message(self, body: Union[bytes, str]) -> None:
-        wait = self._thread_pool.apply_async(
-            self.setup_thread,
-            (self._local, self.threaded_workflow_data, self.default_workflow_data, self._listeners)
-        )
-        wait.wait(10)
-
-        result = self._thread_pool.apply_async(
+        result = self._thread_pool_save.apply_async(
             self.handle_message_in_thread,
-            (self._local, self.threaded_workflow_data),
+            (self._local,),
         )
-        result.get(10)
+        result.wait(30)
 
 
 class ReconnectingURLConsumer:
@@ -569,6 +597,8 @@ class ReconnectingURLConsumer:
         self._consumer = consumer
         self._kwargs = kwargs
         self._consumer_type = type(consumer)
+        self.tries = 0
+        self.max_tries = 2
 
     def run(self):
         while True:
@@ -577,7 +607,14 @@ class ReconnectingURLConsumer:
             except KeyboardInterrupt:
                 self._consumer.stop()
                 break
-            self._maybe_reconnect()
+            except StreamLostError:
+                if self.tries > self.max_tries:
+                    self._consumer.stop()
+                    break
+
+                self._maybe_reconnect()
+
+                self.tries += 1
 
     def _maybe_reconnect(self):
         if self._consumer.should_reconnect:
@@ -589,7 +626,7 @@ class ReconnectingURLConsumer:
 
     def _get_reconnect_delay(self):
         if self._consumer.was_consuming:
-            self._reconnect_delay = 0
+            self._reconnect_delay = 1
         else:
             self._reconnect_delay += 1
         if self._reconnect_delay > 30:

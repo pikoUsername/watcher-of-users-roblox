@@ -5,7 +5,7 @@ from typing import Optional
 from aiohttp import ClientSession
 from loguru import logger
 from selenium.common import NoSuchElementException
-from selenium.webdriver import Chrome
+from selenium.webdriver import Chrome, ActionChains
 from selenium.webdriver.common.by import By
 
 from app.config import Settings
@@ -31,6 +31,15 @@ def auth(browser: Chrome, token: str):
     browser.get(ROBLOX_HOME_URL)
     set_token(browser, token)  # noqa
     browser.refresh()
+
+
+def press_agreement_button(browser: Chrome):
+    try:
+        logger.info("Pressing user agreement button")
+        btn = browser.find_element(By.CSS_SELECTOR, ".modal-window .modal-footer .modal-button")
+        btn.click()
+    except NoSuchElementException:
+        return
 
 
 class UrlHandler(IListener):
@@ -66,6 +75,8 @@ class UrlHandler(IListener):
 
         _task = loop.create_task(token_service.fetch_token())
         token = loop.run_until_complete(_task)
+        if not token:
+            raise ValueError("No tokens available")
 
         logger.info("First token has been taken")
 
@@ -142,8 +153,6 @@ class UrlHandler(IListener):
         t = time.monotonic()
         logger.info(f"Redirecting to {url}")
         driver.get(url)
-        if settings.debug:
-            driver.save_screenshot("screenshot.png")
         link = driver.find_element(By.CSS_SELECTOR, ".age-bracket-label > a.text-link")
         profile_url = link.get_attribute("href")
         user_id = extract_user_id_from_profile_url(profile_url)
@@ -153,16 +162,31 @@ class UrlHandler(IListener):
             # it can't buy this battlepass
             return
         if robux < 5:
-            await self.change_token_recursive(driver)
+            try:
+                await self.change_token_recursive(driver)
+            except RuntimeError:
+                data = ReturnSignal(
+                    status_code=StatusCodes.no_tokens_available,
+                )
+                publisher.send_message(data.dict())
+                return
+
+        press_agreement_button(driver)
 
         # finds a buy button element
+        # try:
+        logger.info("Getting purchase button")
         try:
-            logger.debug("Getting purchase button")
-            btn = driver.find_element(By.CLASS_NAME, "PurchaseButton")
-            # HERE IT'S BUYS GAMEPASS
-            btn.click()
 
-            confirm_btn = driver.find_element(By.ID, "confirm-btn")
+            actions = ActionChains(driver)
+
+            btn = driver.find_element(By.CLASS_NAME, "PurchaseButton")
+
+            actions.move_to_element(btn)
+            actions.click(btn)
+
+            actions.perform()
+
         except NoSuchElementException:
             logger.info("Gamepass has been already bought")
 
@@ -172,10 +196,25 @@ class UrlHandler(IListener):
 
             logger.debug("Sending back information about.")
         else:
-            confirm_btn.click()
 
-            logger.info(f"Purchased gamepass for {cost} robuxes")
+            actions = ActionChains(driver)
+
+            confirm_btn = driver.find_element(By.CSS_SELECTOR, "a#confirm-btn.btn-primary-md")
+
+            logger.info("Clicking buy now")
+
+            actions.move_to_element(confirm_btn)
+
+            # HERE IT'S BUYS GAMEPASS
+            actions.click(confirm_btn)
+
+            actions.perform()
+            logger.info(f"Purchased gamepass for {cost.text} robuxes")
             data = ReturnSignal(status_code=StatusCodes.success)
+
+        if settings.debug:
+            driver.save_screenshot("screenshot.png")
+
         if data:
             publisher.send_message(data.dict())
 

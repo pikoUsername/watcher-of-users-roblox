@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS {model_name_here} (
 ```json5
 {
   "errors": [],  // тип ошибок - SendError 
-  "status": 200  // возвращается два состояния 200 и 500   
+  "status": 200  // возвращается несколько состояния, см. app/schemas.py StatusCodes   
 } 
 ```
 `SendError`: 

@@ -20,7 +20,7 @@ def csrf_token_to_request(csrf_token: str, roblox_token: str):
 
 
 def set_token(driver: Chrome, token: str) -> None:
-    driver.add_cookie({"name": ".ROBLOSECURITY", "value": token, "domain": "www.roblox.com"})
+    driver.add_cookie({"name": ".ROBLOSECURITY", "value": token, "domain": ".roblox.com", "secure": True, "httponly": True})
 
 
 def get_driver(settings: "Settings") -> webdriver.Chrome:
@@ -30,9 +30,9 @@ def get_driver(settings: "Settings") -> webdriver.Chrome:
         opts = webdriver.ChromeOptions()
         agent = settings.user_agent
         opts.add_argument(agent)
-        opts.add_argument('--ignore-ssl-errors=yes')
-        opts.add_argument('--disable-gpu')
-        opts.add_argument('--ignore-certificate-errors')
+        # opts.add_argument('--ignore-ssl-errors=yes')
+        # opts.add_argument('--disable-gpu')
+        # opts.add_argument('--ignore-certificate-errors')
         opts.add_argument("--disable-dev-shm-usage")
         opts.add_argument("--headless")
         opts.add_argument("--window-size=%s" % settings.window_size)

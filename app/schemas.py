@@ -8,6 +8,7 @@ class StatusCodes(IntEnum):
     success = 200
     fail = 500
     already_bought = 401
+    no_tokens_available = 402
 
 
 class SendError(BaseModel):

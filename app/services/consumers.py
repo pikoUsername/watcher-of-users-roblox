@@ -577,10 +577,10 @@ class MultiThreadedConsumer(URLConsumer):
         logger.info(f"Handling in {threading.get_ident()} Thread")
 
         data = local.workflow_data.get()
-
         run_listeners(data, local.listeners)
 
     def handle_message(self, body: Union[bytes, str]) -> None:
+
         result = self._thread_pool_save.apply_async(
             self.handle_message_in_thread,
             (self._local,),

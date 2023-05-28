@@ -1,5 +1,7 @@
 import asyncio
 import inspect
+import threading
+from contextvars import Context, copy_context
 from platform import uname
 
 from loguru import logger
@@ -28,10 +30,15 @@ def run_listeners(data, listeners, key: str = '__call__'):
             workflow = _check_spec(spec, data)
             if asyncio.iscoroutinefunction(func):
                 loop = asyncio.get_event_loop()
+                if threading.current_thread().name != "MainThread":
+                    logger.info("Executing in thread")
 
-                logger.debug(f"{func} workflow: {workflow}")
+                    fut = asyncio.run_coroutine_threadsafe(func(**workflow), loop)
+                    fut.result()
 
-                loop.run_until_complete(func(**workflow))
+                    logger.info("Task completed")
+                else:
+                    loop.run_until_complete(func(**workflow))
             else:
                 func(**workflow)
 

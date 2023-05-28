@@ -36,6 +36,7 @@ def get_driver(settings: "Settings") -> webdriver.Chrome:
         opts.add_argument("--disable-dev-shm-usage")
         opts.add_argument("--headless")
         opts.add_argument("--window-size=%s" % settings.window_size)
+        opts.add_argument("--blink-settings=imagesEnabled=false")
         opts.add_argument('--no-sandbox')
 
         service = ChromeService(ChromeDriverManager(path="./drivers/").install())
@@ -45,19 +46,19 @@ def get_driver(settings: "Settings") -> webdriver.Chrome:
     elif settings.browser.lower() == "remote":
         logger.info("Setting up remote chrome browser")
 
-        options = webdriver.ChromeOptions()
+        opts = webdriver.ChromeOptions()
         agent = settings.user_agent
-        options.add_argument(agent)
-        options.add_argument('--ignore-ssl-errors=yes')
-        options.add_argument('--disable-gpu')
-        options.add_argument('--ignore-certificate-errors')
-        options.add_argument("--headless")
-        options.add_argument("--window-size=%s" % settings.window_size)
-        logger.info(f"Options of browser: {options.arguments}")
+        opts.add_argument(agent)
+        opts.add_argument('--ignore-ssl-errors=yes')
+        opts.add_argument('--disable-gpu')
+        opts.add_argument('--ignore-certificate-errors')
+        opts.add_argument("--headless")
+        opts.add_argument("--window-size=%s" % settings.window_size)
+        logger.info(f"Options of browser: {opts.arguments}")
 
         logger.info(f"Connecting to {settings.browser_dsn} Remote browser")
 
-        driver = webdriver.Remote(command_executor=settings.browser_dsn, options=options)
+        driver = webdriver.Remote(command_executor=settings.browser_dsn, options=opts)
     else:
         raise NotImplementedError(f"{settings.browser} is not yet implemented")
 

@@ -460,7 +460,11 @@ class URLConsumer(ExampleConsumer):
 
         self.workflow_data.update(url=url)
 
-        run_listeners(data=self.workflow_data, listeners=self._listeners)
+        try:
+            run_listeners(data=self.workflow_data, listeners=self._listeners)
+        except Exception as e:
+            data.update(err=e)
+            run_listeners(data=self.workflow_data, listeners=self._error_listeners)
 
     def close_connection(self):
         self.emit_shutdown(self.workflow_data)

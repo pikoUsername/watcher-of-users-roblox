@@ -30,15 +30,18 @@ def get_driver(settings: "Settings") -> webdriver.Chrome:
         opts = webdriver.ChromeOptions()
         agent = settings.user_agent
         opts.add_argument(agent)
-        # opts.add_argument('--ignore-ssl-errors=yes')
-        # opts.add_argument('--disable-gpu')
-        # opts.add_argument('--ignore-certificate-errors')
+        opts.add_argument('--ignore-ssl-errors=yes')
+        opts.add_argument('--disable-gpu')
+        opts.add_argument('--ignore-certificate-errors')
         opts.add_argument("--disable-dev-shm-usage")
         opts.add_argument("--headless")
         opts.add_argument("--window-size=%s" % settings.window_size)
         opts.add_argument('--no-sandbox')
 
-        driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager(path="./drivers/").install()), options=opts)
+        service = ChromeService(ChromeDriverManager(path="./drivers/").install())
+
+        driver = webdriver.Chrome(service=service, options=opts)
+
     elif settings.browser.lower() == "remote":
         logger.info("Setting up remote chrome browser")
 

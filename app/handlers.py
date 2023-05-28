@@ -5,15 +5,13 @@ from typing import Optional
 from aiohttp import ClientSession
 from loguru import logger
 from selenium.common import NoSuchElementException
-from selenium.webdriver import Chrome, ActionChains
+from selenium.webdriver import Chrome
 from selenium.webdriver.common.by import By
 
 from app.config import Settings
-from app.errors import GamePassAlreadyBought
 from app.services.abc import IListener, BasicDBConnector
 from app.services.db import get_db_conn
-from app.services.driver import set_token, convert_browser_cookies_to_aiohttp, \
-    extract_user_id_from_profile_url, get_driver
+from app.services.driver import set_token, convert_browser_cookies_to_aiohttp, get_driver
 from app.repos import TokenService
 from app.consts import ROBLOX_TOKEN_KEY, TOKEN_RECURSIVE_CHECK, ROBLOX_HOME_URL
 from app.services.publisher import BasicMessageSender
@@ -51,15 +49,7 @@ class UrlHandler(IListener):
     Очень грязный код
     """
     def __init__(self) -> None:
-        # предпологается что мы будем работать в треде,
-        # так что все переменные будут установлены ТОЛЬКО в setup
-        # потому как в __init__ не принято делать инициализацию вешей
-        # которые требуют сложных действии, да URLHandler для каждого треда будет свой
-        # но лучше перестрахаватся
         self.config: Optional[Settings] = None
-        self.driver: Optional[Chrome] = None
-        self.current_token = ""
-        self._session: Optional[ClientSession] = None
 
         self.token_service: Optional[TokenService] = None
         self.setupped = False
@@ -68,8 +58,6 @@ class UrlHandler(IListener):
         driver = get_driver(settings)
 
         logger.info("Driver has been set")
-
-        data.update(driver=driver)
 
         loop = asyncio.get_event_loop()
 
@@ -82,40 +70,26 @@ class UrlHandler(IListener):
 
         cookies = convert_browser_cookies_to_aiohttp(driver.get_cookies())
 
-        self._session = ClientSession(cookies=cookies)
-        self.driver = driver
-
-        self.current_token = token
-        self.token_service = token_service
+        session = ClientSession(cookies=cookies)
 
         logger.info("Going to login")
         auth(driver, token)
 
         self.setupped = True
 
-    def close(self, driver: Chrome):
+        data.update(driver=driver, session=session)
+
+    def close(self, driver: Chrome, session):
         driver.quit()
 
         loop = asyncio.get_event_loop()
 
-        loop.run_until_complete(self._session.close())
+        loop.run_until_complete(session.close())
 
         logger.info("Closing up...")
 
-    async def get_robux_by_uid(self, driver: Chrome, user_id: int) -> int:
-        cookies = driver.get_cookies()
-        cookies = convert_browser_cookies_to_aiohttp(cookies)
-
-        robux_url = "https://economy.roblox.com/v1/users/{user_id}/currency"
-
-        async with self._session.get(robux_url.format(user_id=user_id), cookies=cookies) as resp:
-            logger.info(f"Headers, {resp.headers}")
-            logger.info(f"Status, {resp.status}")
-            logger.info(f"Body, {await resp.text()}")
-
-            assert resp.status == 200
-
-            return int((await resp.json()).get("robux"))
+    def get_robuxes(self, driver: Chrome) -> int:
+        return int(driver.find_element(By.ID, "nav-robux-amount").text)
 
     async def mark_as_spent(self, driver) -> None:
         token = driver.get_cookie(ROBLOX_TOKEN_KEY)
@@ -153,10 +127,7 @@ class UrlHandler(IListener):
         t = time.monotonic()
         logger.info(f"Redirecting to {url}")
         driver.get(url)
-        link = driver.find_element(By.CSS_SELECTOR, ".age-bracket-label > a.text-link")
-        profile_url = link.get_attribute("href")
-        user_id = extract_user_id_from_profile_url(profile_url)
-        robux = await self.get_robux_by_uid(driver, user_id)
+        robux = self.get_robuxes(driver)
         cost = driver.find_element(By.CLASS_NAME, "text-robux-lg")
         if int(cost.text) > robux:
             # it can't buy this battlepass
@@ -173,20 +144,10 @@ class UrlHandler(IListener):
 
         press_agreement_button(driver)
 
-        # finds a buy button element
-        # try:
-        logger.info("Getting purchase button")
         try:
-
-            actions = ActionChains(driver)
-
             btn = driver.find_element(By.CLASS_NAME, "PurchaseButton")
 
-            actions.move_to_element(btn)
-            actions.click(btn)
-
-            actions.perform()
-
+            btn.click()
         except NoSuchElementException:
             logger.info("Gamepass has been already bought")
 
@@ -196,19 +157,13 @@ class UrlHandler(IListener):
 
             logger.debug("Sending back information about.")
         else:
-
-            actions = ActionChains(driver)
-
             confirm_btn = driver.find_element(By.CSS_SELECTOR, "a#confirm-btn.btn-primary-md")
 
             logger.info("Clicking buy now")
 
-            actions.move_to_element(confirm_btn)
-
             # HERE IT'S BUYS GAMEPASS
-            actions.click(confirm_btn)
+            confirm_btn.click()
 
-            actions.perform()
             logger.info(f"Purchased gamepass for {cost.text} robuxes")
             data = ReturnSignal(status_code=StatusCodes.success)
 
@@ -262,3 +217,14 @@ class PublisherHandler(IListener):
 
     def __call__(self, *args, **kwargs):
         pass
+
+
+class ErrorHandler(IListener):
+    def setup(self, *args, **kwargs):
+        pass
+
+    def close(self, *args, **kwargs):
+        pass
+
+    def __call__(self, err: Exception):
+        logger.exception(err)

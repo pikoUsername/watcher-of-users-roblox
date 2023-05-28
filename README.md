@@ -92,8 +92,8 @@ $ sudo chmod 0755 /usr/local/bin/chromedrive
 ```shell 
 $ python3 -m venv venv 
 $ . ./venv/bin/activate 
-$ python3 -m pip install pipenv 
-$ python3 -m pipenv install 
+$ python3 -m pip install poetry  
+$ python3 -m poetry install 
 ```
 После этого переименовываем .env.dist в .env, вводим 
 в неё все данные db_dsn, queue_dsn, там указываете по шаблону 

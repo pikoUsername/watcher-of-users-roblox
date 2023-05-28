@@ -23,6 +23,7 @@ class Settings(BaseSettings):
 
     debug: bool = True
     browser: str = "Chrome"
+    browser_dsn: str = ""  # uses only when we are using remote browser
 
     loggers: List[str] = []
 

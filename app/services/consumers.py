@@ -14,10 +14,11 @@ from pika.exceptions import StreamLostError
 from pika.exchange_type import ExchangeType
 from loguru import logger
 
-from app.config import get_settings
 from app.services.abc import ListenerType, BasicConsumer
-from app.consts import DEFAULT_THREADS_COUNT
 from app.services.helpers import run_listeners
+
+
+DEFAULT_THREADS_COUNT = 4
 
 
 # COPY PASTE FROM https://github.com/pika/pika/blob/main/examples/asyncio_consumer_example.py
@@ -390,7 +391,6 @@ class ExampleConsumer(BasicConsumer):
         starting the IOLoop to block and allow the AsyncioConnection to operate.
 
         """
-        print("HERE")
         self._connection = self.connect()
         self._connection.ioloop.run_forever()
 
@@ -512,7 +512,6 @@ class MultiThreadedConsumer(URLConsumer):
         super().__init__(*args, **kwargs)
 
     def run(self):
-        # TODO, необходимо создовать новый asyncpg.Pool для каждого потока
         if not self._thread_pool_save:
             # it will block until driver will be downloaded,
             # and only then it allows pika to run

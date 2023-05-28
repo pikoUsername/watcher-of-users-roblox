@@ -13,6 +13,7 @@ screenshot.png
 .Python
 build/
 develop-eggs/
+rabbitmq/
 assets/
 dist/
 downloads/

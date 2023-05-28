@@ -1,4 +1,5 @@
 from dotenv import load_dotenv
+from loguru import logger
 
 from app.services.consumers import MultiThreadedConsumer, URLConsumer
 from app.log import configure_logging
@@ -17,8 +18,6 @@ async def main():
     config = get_settings()
 
     configure_logging(config.loggers)
-    # to make it use only one db
-    # db = await get_db_conn(config)
 
     kw = {
         "amqp_url": config.queue_dsn,
@@ -37,5 +36,7 @@ async def main():
     root_consumer.add_listener(handlers.PublisherHandler())
     root_consumer.add_listener(handlers.DBHandler())
     root_consumer.add_listener(handlers.UrlHandler())
+
+    logger.info("Starting application")
 
     consumer.run()

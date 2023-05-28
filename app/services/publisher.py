@@ -1,20 +1,17 @@
 import asyncio
 import functools
 import json
-import logging
 import ssl
 import time
 from enum import Enum
 from typing import Dict
 from typing import Optional
 
-import msgpack
+from loguru import logger
 from pydantic import BaseModel, validator
 
 import pika
 from pika.exceptions import AMQPConnectionError
-
-logger = logging.getLogger(__name__)
 
 
 def sync(f):
@@ -84,7 +81,7 @@ class BasicPikaClient:
 
     def check_connection(self):
         if not self.connection or self.connection.is_closed:
-            self._connect()
+            self.connect()
 
     def close(self):
         if not self.channel.is_closed:
@@ -159,4 +156,5 @@ class BasicMessageSender(BasicPikaClient):
                 f"Sent message. Exchange: {exchange_name}, Routing Key: {routing_key}, Body: {body[:128]}"
             )
         else:
+            self.check_connection()
             logger.error("RETURN CHANNEL UNEXPECTEDLY CLOSED BY PEER, TRY TO INCREASE HEARTBEAT")

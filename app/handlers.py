@@ -56,8 +56,6 @@ class UrlHandler(IListener):
         self.setupped = False
 
     async def setup(self, data: dict, conn: BasicDBConnector, settings: Settings, token_service: TokenService):
-        if self.setupped:
-            return
         driver = get_driver(settings)
 
         logger.info("Driver has been set")
@@ -186,11 +184,15 @@ class UrlHandler(IListener):
 
 class DBHandler(IListener):
     async def setup(self, data: dict, settings: Settings):
+        logger.info("Creating database connection...")
         conn = await get_db_conn(settings)
+        logger.info("Database conn complete")
 
         token_service = TokenService.get_current(
             no_error=True
         ) or TokenService(conn, settings.db_tokens_table)
+
+        await token_service.create_tokens_table()
 
         data.update(token_service=token_service, conn=conn)
 
@@ -212,6 +214,7 @@ class PublisherHandler(IListener):
             routing=settings.send_queue_name,
         )
         publisher.connect()
+        logger.info("Connection to publisher has been established")
 
         data.update(publisher=publisher)
 

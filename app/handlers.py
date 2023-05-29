@@ -7,6 +7,8 @@ from loguru import logger
 from selenium.common import NoSuchElementException
 from selenium.webdriver import Chrome
 from selenium.webdriver.common.by import By
+from selenium.webdriver.support.wait import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 
 from app.config import Settings
 from app.services.abc import IListener, BasicDBConnector
@@ -14,6 +16,7 @@ from app.services.db import get_db_conn
 from app.services.driver import set_token, convert_browser_cookies_to_aiohttp, get_driver
 from app.repos import TokenService
 from app.consts import ROBLOX_TOKEN_KEY, TOKEN_RECURSIVE_CHECK, ROBLOX_HOME_URL
+from app.services.helpers import presence_of_any_text_in_element
 from app.services.publisher import BasicMessageSender
 from app.schemas import ReturnSignal, StatusCodes
 
@@ -89,7 +92,10 @@ class UrlHandler(IListener):
         logger.info("Closing up...")
 
     def get_robuxes(self, driver: Chrome) -> int:
-        return int(driver.find_element(By.ID, "nav-robux-amount").text)
+        text = WebDriverWait(driver, 5).until(
+            presence_of_any_text_in_element((By.ID, "nav-robux-amount"))
+        )
+        return int(text)
 
     async def mark_as_spent(self, driver) -> None:
         token = driver.get_cookie(ROBLOX_TOKEN_KEY)
@@ -128,6 +134,8 @@ class UrlHandler(IListener):
         logger.info(f"Redirecting to {url}")
         driver.get(url)
         robux = self.get_robuxes(driver)
+        if settings.debug:
+            driver.save_screenshot("screenshot.png")
         cost = driver.find_element(By.CLASS_NAME, "text-robux-lg")
         if int(cost.text) > robux:
             # it can't buy this battlepass
@@ -167,8 +175,6 @@ class UrlHandler(IListener):
             logger.info(f"Purchased gamepass for {cost.text} robuxes")
             data = ReturnSignal(status_code=StatusCodes.success)
 
-        if settings.debug:
-            driver.save_screenshot("screenshot.png")
 
         if data:
             publisher.send_message(data.dict())

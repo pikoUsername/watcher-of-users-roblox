@@ -5,6 +5,7 @@ from contextvars import Context, copy_context
 from platform import uname
 
 from loguru import logger
+from selenium.common import StaleElementReferenceException
 
 from .exceptions import SkipException
 
@@ -31,12 +32,13 @@ def run_listeners(data, listeners, key: str = '__call__'):
             if asyncio.iscoroutinefunction(func):
                 loop = asyncio.get_event_loop()
                 if threading.current_thread().name != "MainThread":
-                    logger.info("Executing in thread")
+                    logger.debug("Executing in thread")
+                    logger.debug(f"Workflow of task: {workflow}, Function: {func}")
 
-                    fut = asyncio.run_coroutine_threadsafe(func(**workflow), loop)
-                    fut.result()
+                    task = func(**workflow)
+                    loop.run_until_complete(task)
 
-                    logger.info("Task completed")
+                    logger.debug("Task in thread has been completed")
                 else:
                     loop.run_until_complete(func(**workflow))
             else:
@@ -48,3 +50,22 @@ def run_listeners(data, listeners, key: str = '__call__'):
 
 def in_wsl() -> bool:
     return 'microsoft-standard' in uname().release
+
+
+def presence_of_any_text_in_element(locator):
+    """
+    It returns the text of the element
+
+    :param locator:
+    :return:
+    """
+    def _predicate(driver):
+        try:
+            element_text = driver.find_element(*locator).text
+            if element_text != "":
+                return element_text
+            return False
+        except StaleElementReferenceException:
+            return False
+
+    return _predicate

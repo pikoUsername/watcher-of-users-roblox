@@ -460,11 +460,7 @@ class URLConsumer(ExampleConsumer):
 
         self.workflow_data.update(url=url)
 
-        try:
-            run_listeners(data=self.workflow_data, listeners=self._listeners)
-        except Exception as e:
-            data.update(err=e)
-            run_listeners(data=self.workflow_data, listeners=self._error_listeners)
+        run_listeners(data=self.workflow_data, listeners=self._listeners)
 
     def close_connection(self):
         self.emit_shutdown(self.workflow_data)
@@ -517,6 +513,7 @@ class MultiThreadedConsumer(URLConsumer):
 
     def run(self):
         if not self._thread_pool_save:
+            logger.info("Initializing thread pool")
             # it will block until driver will be downloaded,
             # and only then it allows pika to run
             self._thread_pool_save = ThreadPool(
@@ -552,8 +549,8 @@ class MultiThreadedConsumer(URLConsumer):
     def close_connection(self):
         # waits until ALL tasks complete,
         # only then it tries to call close for every handler
-        time.sleep(2)
         if self._thread_pool_save:
+            logger.info("closing all threads")
 
             # then it will apply to all threads, in hope they will accept it
             # with noone getting two iterable.
@@ -573,19 +570,22 @@ class MultiThreadedConsumer(URLConsumer):
         run_listeners(data, listeners, "close")
 
     @staticmethod
-    def handle_message_in_thread(local):
+    def handle_message_in_thread(local, url):
         logger.info(f"Handling in {threading.get_ident()} Thread")
 
         data = local.workflow_data.get()
+
+        data.update(url=url)
+
         run_listeners(data, local.listeners)
 
     def handle_message(self, body: Union[bytes, str]) -> None:
-
-        result = self._thread_pool_save.apply_async(
+        logger.info("Handling in thread")
+        url = json.loads(body)["url"]
+        self._thread_pool_save.apply(
             self.handle_message_in_thread,
-            (self._local,),
+            (self._local, url),
         )
-        result.wait(30)
 
 
 class ReconnectingURLConsumer:

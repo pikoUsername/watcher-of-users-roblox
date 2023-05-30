@@ -140,7 +140,7 @@ class BasicMessageSender(BasicPikaClient):
         if not routing_key:
             routing_key = self.routing
         body = bytes(json.dumps(body), 'utf8')
-        if self.channel.is_closed:
+        if not self.channel.is_closed:
             self.channel.basic_publish(
                 exchange=exchange_name,
                 routing_key=routing_key,

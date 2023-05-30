@@ -80,8 +80,9 @@ class UrlHandler(IListener):
 
         session = ClientSession(cookies=cookies)
 
-        logger.info("Going to login")
+        logger.info("Logging in")
         auth(driver, token)
+        logger.info("Login complete")
 
         self.setupped = True
 
@@ -145,6 +146,8 @@ class UrlHandler(IListener):
         driver.get(purchase_data.url)
         robux = self.get_robuxes(driver)
         if purchase_data != robux:
+            logger.info("Price is not equal to url's price")
+
             data.update(
                 return_signal=ReturnSignal(status_code=StatusCodes.invalid_price)
             )
@@ -249,8 +252,10 @@ class DataHandler(IListener):
     def __call__(self, data: dict, body: bytes, publisher: BasicMessageSender):
         try:
             _temp = json.loads(body)
-            pur_data = PurchaseData.construct(_temp)
+            pur_data = PurchaseData(**_temp)
         except json.JSONDecodeError:
+            logger.error("NOT HELLO")
+
             raise CancelException
         except pydantic.ValidationError as e:
             logger.info(f"Invalid data: {body}")
@@ -258,7 +263,7 @@ class DataHandler(IListener):
             data = ReturnSignal(status_code=StatusCodes.invalid_data, errors=[e.errors()])
 
             publisher.send_message(data.dict())
-            return
+            raise CancelException
 
         data.update(purchase_data=pur_data)
 

@@ -39,12 +39,12 @@ def second_main():
 
     print(os.environ["queue_name"], ", Published a data")
 
-    for _ in range(1):
+    for _ in range(10):
         channel.basic_publish(
             exchange="url",
             routing_key=os.environ["queue_name"],
-            body=b'{"url": "https://www.roblox.com/game-pass/182158409/unnamed"}',
-            properties=pika.BasicProperties(content_type="application/json", delivery_mode=pika.DeliveryMode.Transient),
+            body=b'{"url": "https://www.roblox.com/game-pass/182158409/unnamed", "price": 200}',
+            properties=pika.BasicProperties(content_type="application/json"),
         )
 
     conn.close()

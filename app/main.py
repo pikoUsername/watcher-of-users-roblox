@@ -26,8 +26,8 @@ async def main():
         "routing": config.queue_name,
         "workflow_data": {"settings": config}
     }
-    # root_consumer = URLConsumer(**kw)
-    root_consumer = MultiThreadedConsumer(**kw)
+    root_consumer = URLConsumer(**kw)
+    # root_consumer = MultiThreadedConsumer(**kw)
     consumer = ReconnectingURLConsumer(
         consumer=root_consumer,
         **kw,

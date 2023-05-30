@@ -27,7 +27,7 @@ class SendError(BaseModel):
 class ReturnSignal(BaseModel):
     errors: Optional[List[SendError]] = []
     status_code: StatusCodes
-    info: str
+    info: Optional[str] = ""
 
     @validator("errors")
     def validate_error(cls, value: List[Exception]):

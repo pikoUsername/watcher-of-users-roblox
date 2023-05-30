@@ -1,7 +1,9 @@
 import asyncio
+import json
 import time
 from typing import Optional
 
+import pydantic
 from aiohttp import ClientSession
 from loguru import logger
 from selenium.common import NoSuchElementException
@@ -13,12 +15,15 @@ from selenium.webdriver.support import expected_conditions as EC
 from app.config import Settings
 from app.services.abc import IListener, BasicDBConnector
 from app.services.db import get_db_conn
-from app.services.driver import set_token, convert_browser_cookies_to_aiohttp, get_driver
+from app.services.driver import set_token, convert_browser_cookies_to_aiohttp, get_driver, \
+    presence_of_any_text_in_element
 from app.repos import TokenService
 from app.consts import ROBLOX_TOKEN_KEY, TOKEN_RECURSIVE_CHECK, ROBLOX_HOME_URL
-from app.services.helpers import presence_of_any_text_in_element
+from app.services.exceptions import SkipException, CancelException
+from app.services.helpers import validate_url
 from app.services.publisher import BasicMessageSender
 from app.schemas import ReturnSignal, StatusCodes
+from app.schemas import PurchaseData
 
 
 def auth(browser: Chrome, token: str):
@@ -128,58 +133,56 @@ class UrlHandler(IListener):
             return True
         return False
 
-    async def __call__(self, driver: Chrome, url: str, settings: Settings, publisher: BasicMessageSender):
-        # предпологается что бразуер уже авторизорван
-        t = time.monotonic()
-        logger.info(f"Redirecting to {url}")
-        driver.get(url)
+    async def __call__(
+            self,
+            driver: Chrome,
+            purchase_data: PurchaseData,
+            settings: Settings,
+            publisher: BasicMessageSender,
+            data: dict
+    ) -> None:
+        logger.info(f"Redirecting to {purchase_data.url}")
+        driver.get(purchase_data.url)
         robux = self.get_robuxes(driver)
+        if purchase_data != robux:
+            data.update(
+                return_signal=ReturnSignal(status_code=StatusCodes.invalid_price)
+            )
+
+            return
         if settings.debug:
             driver.save_screenshot("screenshot.png")
         cost = driver.find_element(By.CLASS_NAME, "text-robux-lg")
-        if int(cost.text) > robux:
-            # it can't buy this battlepass
-            return
-        if robux < 5:
+        if robux < 5 or int(cost.text) > robux:
             try:
                 await self.change_token_recursive(driver)
             except RuntimeError:
-                data = ReturnSignal(
-                    status_code=StatusCodes.no_tokens_available,
+                data.update(
+                    return_signal=ReturnSignal(
+                        status_code=StatusCodes.no_tokens_available,
+                    )
                 )
-                publisher.send_message(data.dict())
                 return
-
         press_agreement_button(driver)
-
         try:
             btn = driver.find_element(By.CLASS_NAME, "PurchaseButton")
-
             btn.click()
         except NoSuchElementException:
             logger.info("Gamepass has been already bought")
-
-            data = ReturnSignal(
+            _temp = ReturnSignal(
                 status_code=StatusCodes.already_bought,
             )
-
             logger.debug("Sending back information about.")
         else:
             confirm_btn = driver.find_element(By.CSS_SELECTOR, "a#confirm-btn.btn-primary-md")
-
             logger.info("Clicking buy now")
-
-            # HERE IT'S BUYS GAMEPASS
+            # HERE IT BUYS GAMEPASS
             confirm_btn.click()
-
             logger.info(f"Purchased gamepass for {cost.text} robuxes")
-            data = ReturnSignal(status_code=StatusCodes.success)
-
-
-        if data:
-            publisher.send_message(data.dict())
-
-        logger.info(f"Execution Time: {(time.monotonic() - t)}")
+            _temp = ReturnSignal(
+                status_code=StatusCodes.success,
+            )
+        data.update(return_signal=_temp)
 
 
 class DBHandler(IListener):
@@ -234,3 +237,39 @@ class ErrorHandler(IListener):
 
     def __call__(self, err: Exception):
         logger.exception(err)
+
+
+class DataHandler(IListener):
+    def setup(self, *args, **kwargs):
+        pass
+
+    def close(self, *args, **kwargs):
+        pass
+
+    def __call__(self, data: dict, body: bytes, publisher: BasicMessageSender):
+        try:
+            _temp = json.loads(body)
+            pur_data = PurchaseData.construct(_temp)
+        except json.JSONDecodeError:
+            raise CancelException
+        except pydantic.ValidationError as e:
+            logger.info(f"Invalid data: {body}")
+
+            data = ReturnSignal(status_code=StatusCodes.invalid_data, errors=[e.errors()])
+
+            publisher.send_message(data.dict())
+            return
+
+        data.update(purchase_data=pur_data)
+
+
+class ReturnSignalHandler(IListener):
+    def setup(self, *args, **kwargs):
+        pass
+
+    def close(self, *args, **kwargs):
+        pass
+
+    def __call__(self, publisher: BasicMessageSender, return_signal: ReturnSignal = None, ):
+        if return_signal is not None:
+            publisher.send_message(return_signal.dict())

@@ -33,9 +33,12 @@ async def main():
         **kw,
     )
 
+    # DONT CHANGE ORDER
     root_consumer.add_listener(handlers.PublisherHandler())
     root_consumer.add_listener(handlers.DBHandler())
+    root_consumer.add_listener(handlers.DataHandler())
     root_consumer.add_listener(handlers.UrlHandler())
+    root_consumer.add_listener(handlers.ReturnSignalHandler())
 
     logger.info("Starting application")
 

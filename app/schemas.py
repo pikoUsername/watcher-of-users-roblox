@@ -4,11 +4,19 @@ from typing import List, Optional
 from pydantic import BaseModel, validator
 
 
+class PurchaseData(BaseModel):
+    # anemic model
+    price: int
+    url: str
+
+
 class StatusCodes(IntEnum):
     success = 200
     fail = 500
     already_bought = 401
     no_tokens_available = 402
+    invalid_data = 400
+    invalid_price = 403
 
 
 class SendError(BaseModel):
@@ -19,6 +27,7 @@ class SendError(BaseModel):
 class ReturnSignal(BaseModel):
     errors: Optional[List[SendError]] = []
     status_code: StatusCodes
+    info: str
 
     @validator("errors")
     def validate_error(cls, value: List[Exception]):

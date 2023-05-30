@@ -1,13 +1,12 @@
 import asyncio
 import inspect
 import threading
-from contextvars import Context, copy_context
 from platform import uname
+from urllib.parse import urlparse
 
 from loguru import logger
-from selenium.common import StaleElementReferenceException
 
-from .exceptions import SkipException
+from .exceptions import SkipException, CancelException
 
 
 def _get_spec(func: callable):
@@ -46,26 +45,14 @@ def run_listeners(data, listeners, key: str = '__call__'):
 
         except SkipException:
             pass
+        except CancelException:
+            break
 
 
 def in_wsl() -> bool:
     return 'microsoft-standard' in uname().release
 
 
-def presence_of_any_text_in_element(locator):
-    """
-    It returns the text of the element
-
-    :param locator:
-    :return:
-    """
-    def _predicate(driver):
-        try:
-            element_text = driver.find_element(*locator).text
-            if element_text != "":
-                return element_text
-            return False
-        except StaleElementReferenceException:
-            return False
-
-    return _predicate
+def validate_url(url: str):
+    parsed_url = urlparse(url)
+    return bool(parsed_url.scheme and parsed_url.netloc)

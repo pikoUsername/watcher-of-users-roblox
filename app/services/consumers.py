@@ -5,8 +5,8 @@ import json
 import functools
 import threading
 import time
-from multiprocessing.pool import ThreadPool
-from typing import Union, List, Callable
+from multiprocessing.pool import ThreadPool, CLOSE
+from typing import Union, List, Callable, Any
 
 import pika
 from pika.adapters.asyncio_connection import AsyncioConnection
@@ -18,7 +18,7 @@ from app.services.abc import ListenerType, BasicConsumer
 from app.services.helpers import run_listeners
 
 
-DEFAULT_THREADS_COUNT = 4
+DEFAULT_THREADS_COUNT = 1
 
 
 # COPY PASTE FROM https://github.com/pika/pika/blob/main/examples/asyncio_consumer_example.py
@@ -453,12 +453,10 @@ class URLConsumer(ExampleConsumer):
         run_listeners(workflow, self._listeners, "close")
 
     def handle_message(self, body: Union[bytes, str]) -> None:
-        data = json.loads(body)
-        url = data["url"]
 
-        logger.info(f"Handling body, with url: {url}")
+        logger.info(f"Handling body, with body: {body}")
 
-        self.workflow_data.update(url=url)
+        self.workflow_data.update(body=body)
 
         run_listeners(data=self.workflow_data, listeners=self._listeners)
 
@@ -495,35 +493,31 @@ class MultiThreadedConsumer(URLConsumer):
 
     TODO
     """
-    # anti-pattern, it allows only one thread pool to exists
-    # in the whole application, you need manually delete to create a new one
     _thread_pool_save: ThreadPool = None
 
     def __init__(self, *args, **kwargs):
         self._threads_count = kwargs.pop("threads_count", DEFAULT_THREADS_COUNT)
 
         self._local = threading.local()
-
-        self.threaded_workflow_data = contextvars.ContextVar(
-            "workflow_data"
-        )
         self.default_workflow_data = kwargs.get("workflow_data", {})
 
         super().__init__(*args, **kwargs)
 
-    def run(self):
-        if not self._thread_pool_save:
-            logger.info("Initializing thread pool")
-            # it will block until driver will be downloaded,
-            # and only then it allows pika to run
-            self._thread_pool_save = ThreadPool(
-                1,
-                initializer=self.setup_thread,
-                initargs=(self._local, self.threaded_workflow_data, self.default_workflow_data, self._listeners)
-            )
+        self.workflow_data = contextvars.ContextVar(
+            "workflow_data"
+        )
 
-        # просто УЖАСНЫЙ код, если тут изменится API, то поломается все
-        super(URLConsumer, self).run()
+    def create_pool(self) -> ThreadPool:
+        return ThreadPool(
+            self._threads_count,
+            initializer=self.setup_thread,
+            initargs=(self._local, self.workflow_data, self.default_workflow_data, self._listeners)
+        )
+
+    def emit_startup(self, workflow: dict):
+        if not self._thread_pool_save or self._thread_pool_save._state == CLOSE:
+            logger.info("Initializing thread pool")
+            self._thread_pool_save = self.create_pool()
 
     @staticmethod
     def setup_thread(local, workflow_data: contextvars.ContextVar, default_data: dict, listeners: List[ListenerType]):
@@ -534,7 +528,6 @@ class MultiThreadedConsumer(URLConsumer):
         logger.info(f"Executing in {threading.get_ident()}")
 
         data = {}
-        # need to reference to itself!
         if default_data:
             data.update(default_data)
         data.update(data=data)
@@ -546,21 +539,35 @@ class MultiThreadedConsumer(URLConsumer):
         local.listeners = listeners
         local.workflow_data = workflow_data
 
-    def close_connection(self):
-        # waits until ALL tasks complete,
-        # only then it tries to call close for every handler
+    def submit_to_all_threads(self, func, value, chunk_size=None) -> List[Any]:
+        """
+        Вызвает переданную функцию в каждом потоке,
+        копируя значения из value, либо передавая его по ссылке.
+
+        * Следует обратить внимание что value должен быть
+          либо: local, или ContextVar, либо по другому может возникнуть
+          ошибка race condition которое сложно дебажить
+
+        :param func:
+        :param value:
+        :param chunk_size:
+        :return:
+        """
+        return self._thread_pool_save.map(
+            func, [value for _ in range(self._threads_count)], chunk_size
+        )
+
+    def emit_shutdown(self, workflow: dict):
         if self._thread_pool_save:
+            if self._thread_pool_save._state == CLOSE:
+                return
             logger.info("closing all threads")
 
             # then it will apply to all threads, in hope they will accept it
-            # with noone getting two iterable.
-            result = self._thread_pool_save.map_async(
-                self._close_thread, [self._local for _ in range(self._threads_count)],
-            )
-            result.wait(10)
+            # naive approach, but I wasn't able to find better solution.
+            self.submit_to_all_threads(self._close_thread, self._local)
 
             self._thread_pool_save.close()
-        super(URLConsumer, self).close_connection()
 
     @staticmethod
     def _close_thread(local):
@@ -570,21 +577,18 @@ class MultiThreadedConsumer(URLConsumer):
         run_listeners(data, listeners, "close")
 
     @staticmethod
-    def handle_message_in_thread(local, url):
+    def handle_message_in_thread(local, body):
         logger.info(f"Handling in {threading.get_ident()} Thread")
 
         data = local.workflow_data.get()
 
-        data.update(url=url)
-
+        data.update(body=body)
         run_listeners(data, local.listeners)
 
     def handle_message(self, body: Union[bytes, str]) -> None:
-        logger.info("Handling in thread")
-        url = json.loads(body)["url"]
         self._thread_pool_save.apply(
             self.handle_message_in_thread,
-            (self._local, url),
+            (self._local, body),
         )
 
 

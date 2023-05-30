@@ -2,6 +2,7 @@ from typing import List, Dict, Any, TYPE_CHECKING
 from urllib.parse import urlparse
 
 from loguru import logger
+from selenium.common import StaleElementReferenceException
 from seleniumwire import webdriver
 from selenium.webdriver.chrome.service import Service as ChromeService
 from seleniumwire.webdriver import Chrome
@@ -78,3 +79,22 @@ def extract_user_id_from_profile_url(url: str) -> int:
     uri = urlparse(url).path[1:]
     parts = uri.split('/')
     return int(parts[1])
+
+
+def presence_of_any_text_in_element(locator):
+    """
+    It returns the text of the element
+
+    :param locator:
+    :return:
+    """
+    def _predicate(driver):
+        try:
+            element_text = driver.find_element(*locator).text
+            if element_text != "":
+                return element_text
+            return False
+        except StaleElementReferenceException:
+            return False
+
+    return _predicate

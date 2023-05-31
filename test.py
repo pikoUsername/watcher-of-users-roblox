@@ -34,16 +34,17 @@ def second_main():
     conn = pika.BlockingConnection(params)
 
     channel = conn.channel()
+    queue_name = os.environ["queue_name"]
 
-    channel.queue_declare(os.environ["queue_name"])
+    channel.queue_declare(queue_name)
 
-    print(os.environ["queue_name"], ", Published a data")
+    print(queue_name, ", Published a data")
 
-    for _ in range(10):
+    for _ in range(1):
         channel.basic_publish(
             exchange="url",
             routing_key=os.environ["queue_name"],
-            body=b'{"url": "https://www.roblox.com/game-pass/182158409/unnamed", "price": 200}',
+            body=b'{"url": "https://www.roblox.com/game-pass/153455721/Husband", "price": 10}',
             properties=pika.BasicProperties(content_type="application/json"),
         )
 

@@ -145,7 +145,9 @@ class UrlHandler(IListener):
         logger.info(f"Redirecting to {purchase_data.url}")
         driver.get(purchase_data.url)
         robux = self.get_robuxes(driver)
-        if purchase_data != robux:
+        cost = driver.find_element(By.CLASS_NAME, "text-robux-lg")
+        logger.info(f"Cost of gamepass from page: {cost.text}")
+        if purchase_data.price != int(cost.text):
             logger.info("Price is not equal to url's price")
 
             data.update(
@@ -153,9 +155,7 @@ class UrlHandler(IListener):
             )
 
             return
-        if settings.debug:
-            driver.save_screenshot("screenshot.png")
-        cost = driver.find_element(By.CLASS_NAME, "text-robux-lg")
+
         if robux < 5 or int(cost.text) > robux:
             try:
                 await self.change_token_recursive(driver)
@@ -181,6 +181,8 @@ class UrlHandler(IListener):
             logger.info("Clicking buy now")
             # HERE IT BUYS GAMEPASS
             confirm_btn.click()
+            if settings.debug:
+                driver.save_screenshot("screenshot.png")
             logger.info(f"Purchased gamepass for {cost.text} robuxes")
             _temp = ReturnSignal(
                 status_code=StatusCodes.success,

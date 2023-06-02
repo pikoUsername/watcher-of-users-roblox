@@ -6,7 +6,7 @@ from typing import Optional
 import pydantic
 from aiohttp import ClientSession
 from loguru import logger
-from selenium.common import NoSuchElementException
+from selenium.common import NoSuchElementException, TimeoutException
 from selenium.webdriver import Chrome
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.wait import WebDriverWait
@@ -22,7 +22,7 @@ from app.consts import ROBLOX_TOKEN_KEY, TOKEN_RECURSIVE_CHECK, ROBLOX_HOME_URL
 from app.services.exceptions import SkipException, CancelException
 from app.services.helpers import validate_url
 from app.services.publisher import BasicMessageSender
-from app.schemas import ReturnSignal, StatusCodes
+from app.schemas import ReturnSignal, StatusCodes, SendError
 from app.schemas import PurchaseData
 
 
@@ -97,11 +97,35 @@ class UrlHandler(IListener):
 
         logger.info("Closing up...")
 
-    def get_robuxes(self, driver: Chrome) -> int:
-        text = WebDriverWait(driver, 5).until(
-            presence_of_any_text_in_element((By.ID, "nav-robux-amount"))
-        )
-        return int(text)
+    async def get_robuxes(self, driver: Chrome, session: ClientSession) -> int:
+        try:
+            # if it's text is ? then it means we cant buy, it means this session can't be used
+            text = WebDriverWait(driver, 3).until(
+                presence_of_any_text_in_element((By.ID, "nav-robux-amount"))
+            )
+            text = int(text)
+        except TimeoutException:
+            return await self.get_robux_by_request(driver, session)
+
+        return text
+
+    async def get_robux_by_request(self, driver: Chrome, session: ClientSession) -> int:
+        cookies = driver.get_cookies()
+        cookies = convert_browser_cookies_to_aiohttp(cookies)
+
+        element = driver.find_element((By.CSS_SELECTOR, "meta[name='user-data']"))
+        user_id = element.get_attribute("data-userid")
+
+        robux_url = "https://economy.roblox.com/v1/users/{user_id}/currency"
+
+        async with session.get(robux_url.format(user_id=user_id), cookies=cookies) as resp:
+            logger.info(f"Headers, {resp.headers}")
+            logger.info(f"Status, {resp.status}")
+            logger.info(f"Body, {await resp.text()}")
+
+            assert resp.status == 200
+
+            return (await resp.json()).get("robux")
 
     async def mark_as_spent(self, driver) -> None:
         token = driver.get_cookie(ROBLOX_TOKEN_KEY)
@@ -140,11 +164,24 @@ class UrlHandler(IListener):
             purchase_data: PurchaseData,
             settings: Settings,
             publisher: BasicMessageSender,
-            data: dict
+            data: dict,
+            session: ClientSession
     ) -> None:
         logger.info(f"Redirecting to {purchase_data.url}")
         driver.get(purchase_data.url)
-        robux = self.get_robuxes(driver)
+
+        try:
+            robux = await self.get_robuxes(driver, session)
+        except ValueError:
+            # не надо волноватся если транзакция улетит в утиль
+            # потому как здесь если обработка сообщения прервана
+            # и без ack то реббитмкью не удалит ту запись
+            logger.error("ROBLOX DETECTED WEB BROWSER IS A BOT. RESTARTING!")
+            raise
+
+        if settings.debug:
+            driver.save_screenshot("screenshot.png")
+
         cost = driver.find_element(By.CLASS_NAME, "text-robux-lg")
         logger.info(f"Cost of gamepass from page: {cost.text}")
         if purchase_data.price != int(cost.text):
@@ -181,8 +218,7 @@ class UrlHandler(IListener):
             logger.info("Clicking buy now")
             # HERE IT BUYS GAMEPASS
             confirm_btn.click()
-            if settings.debug:
-                driver.save_screenshot("screenshot.png")
+
             logger.info(f"Purchased gamepass for {cost.text} robuxes")
             _temp = ReturnSignal(
                 status_code=StatusCodes.success,
@@ -262,7 +298,9 @@ class DataHandler(IListener):
         except pydantic.ValidationError as e:
             logger.info(f"Invalid data: {body}")
 
-            data = ReturnSignal(status_code=StatusCodes.invalid_data, errors=[e.errors()])
+            errors = [SendError(name="validation error", info=str(e.errors()))]
+
+            data = ReturnSignal(status_code=StatusCodes.invalid_data, errors=errors)
 
             publisher.send_message(data.dict())
             raise CancelException
@@ -277,6 +315,6 @@ class ReturnSignalHandler(IListener):
     def close(self, *args, **kwargs):
         pass
 
-    def __call__(self, publisher: BasicMessageSender, return_signal: ReturnSignal = None, ):
-        if return_signal is not None:
-            publisher.send_message(return_signal.dict())
+    async def __call__(self, publisher: BasicMessageSender,  purchase_data: PurchaseData, return_signal: ReturnSignal):
+        return_signal.tx_id = purchase_data.tx_id
+        publisher.send_message(return_signal.dict())

@@ -47,6 +47,9 @@ class BasicPikaClient:
         self.routing = routing
 
     def setup(self):
+        logger.info(f"Declaring exchange: {self.exchange}")
+        logger.info(f"Declaring queue: {self.queue}")
+
         self.declare_exchange(self.exchange)
         self.declare_queue(self.queue)
 
@@ -140,7 +143,7 @@ class BasicMessageSender(BasicPikaClient):
         if not routing_key:
             routing_key = self.routing
         body = bytes(json.dumps(body), 'utf8')
-        if not self.channel.is_closed:
+        if self.channel.is_open:
             self.channel.basic_publish(
                 exchange=exchange_name,
                 routing_key=routing_key,
@@ -152,7 +155,7 @@ class BasicMessageSender(BasicPikaClient):
                     content_type="application/json",
                 ),
             )
-            logger.debug(
+            logger.info(
                 f"Sent message. Exchange: {exchange_name}, Routing Key: {routing_key}, Body: {body[:128]}"
             )
         else:

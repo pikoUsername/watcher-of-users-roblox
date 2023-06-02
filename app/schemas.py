@@ -8,6 +8,7 @@ class PurchaseData(BaseModel):
     # anemic model
     price: int
     url: str
+    tx_id: int
 
 
 class StatusCodes(IntEnum):
@@ -28,6 +29,7 @@ class ReturnSignal(BaseModel):
     errors: Optional[List[SendError]] = []
     status_code: StatusCodes
     info: Optional[str] = ""
+    tx_id: Optional[int] = 0
 
     @validator("errors")
     def validate_error(cls, value: List[Exception]):

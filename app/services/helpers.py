@@ -30,10 +30,9 @@ def run_listeners(data, listeners, key: str = '__call__'):
             workflow = _check_spec(spec, data)
             if asyncio.iscoroutinefunction(func):
                 loop = asyncio.get_event_loop()
+
                 if threading.current_thread().name != "MainThread":
                     logger.debug("Executing in thread")
-                    logger.debug(f"Workflow of task: {workflow}, Function: {func}")
-
                     task = func(**workflow)
                     loop.run_until_complete(task)
 

@@ -615,6 +615,8 @@ class ReconnectingURLConsumer:
                 self._consumer.stop()
                 break
             except StreamLostError:
+                logger.error("Stream lost error, trying to reconnect!")
+
                 if self.tries > self.max_tries:
                     self._consumer.stop()
                     break

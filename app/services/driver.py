@@ -39,6 +39,7 @@ def get_driver(settings: "Settings") -> webdriver.Chrome:
         opts.add_argument("--window-size=%s" % settings.window_size)
         opts.add_argument("--blink-settings=imagesEnabled=false")
         opts.add_argument('--no-sandbox')
+        opts.add_argument("--log-level=3")
 
         service = ChromeService(ChromeDriverManager(path="./drivers/").install())
 
@@ -55,6 +56,7 @@ def get_driver(settings: "Settings") -> webdriver.Chrome:
         opts.add_argument('--ignore-certificate-errors')
         opts.add_argument("--headless")
         opts.add_argument("--window-size=%s" % settings.window_size)
+        opts.add_argument("--log-level=3")
         logger.info(f"Options of browser: {opts.arguments}")
 
         logger.info(f"Connecting to {settings.browser_dsn} Remote browser")

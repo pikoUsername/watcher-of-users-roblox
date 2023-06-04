@@ -229,7 +229,7 @@ class UrlHandler(IListener):
 class DBHandler(IListener):
     async def setup(self, data: dict, settings: Settings):
         logger.info("Creating database connection...")
-        conn = await get_db_conn(settings)
+        conn = await get_db_conn(settings.db_dsn, settings.db_type)
         logger.info("Database conn complete")
 
         token_service = TokenService.get_current(

@@ -78,18 +78,18 @@ class SQLiteDBConnector(BasicDBConnector):
         self.conn.close()
 
 
-async def get_db_conn(config: "Settings") -> BasicDBConnector:
-    if config.db_dsn.startswith("sqlite3"):
+async def get_db_conn(dsn: str, type_: str = "postgresql") -> BasicDBConnector:
+    if type_ == "sqlite3":
         import sqlite3
 
-        conn = sqlite3.connect(config.db_dsn)
+        conn = sqlite3.connect(dsn)
         conn = SQLiteDBConnector(conn)
-    elif config.db_dsn.startswith("postgresql") or config.db_dsn.startswith("postgres"):
+    elif type_ == "postgresql" or type_ == "postgres":
         import asyncpg
 
-        pool = await asyncpg.create_pool(config.db_dsn)
+        pool = await asyncpg.create_pool(dsn)
         conn = AsyncpgDBConnector(pool)
     else:
-        raise ValueError("Db does not support, or DSN empty, dsn: %s" % config.db_dsn)
+        raise ValueError("Db does not support, or DSN empty, dsn: %s" % dsn)
     return conn
 

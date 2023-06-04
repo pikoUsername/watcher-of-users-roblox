@@ -7,6 +7,7 @@ from app.consts import DEFAULT_QUEUE_NAME, DEFAULT_EXCHANGE_NAME, DEFAULT_SEND_N
 
 class Settings(BaseSettings):
     db_dsn: str
+    db_type: str = "postgres"
     db_tokens_table: str
     queue_dsn: str
 

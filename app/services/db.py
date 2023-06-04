@@ -59,7 +59,7 @@ class SQLiteDBConnector(BasicDBConnector):
 
     @property
     def cursor(self) -> sqlite3.Cursor:
-        if self._cursor:
+        if not self._cursor:
             self._cursor = self.conn.cursor()
         return self._cursor
 

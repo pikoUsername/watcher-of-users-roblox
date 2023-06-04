@@ -64,15 +64,18 @@ class SQLiteDBConnector(BasicDBConnector):
         return self._cursor
 
     async def execute(self, sql, *args, **kwargs) -> Optional[str]:
-        self.cursor.execute(sql, *args)
+        self.cursor.execute(sql, args)
         self.conn.commit()
 
     async def fetch(self, sql, *args, **kwargs) -> Dict[str, Any]:
-        result: dict = self.cursor.fetchone(sql, *args)
+        self.cursor.execute(sql, args)
+        result: dict = self.cursor.fetchone()
         return result
 
     async def fetchmany(self, sql, *args, **kwargs) -> List[Dict[str, Any]]:
-        return self.cursor.fetchmany(sql, *args)
+        self.cursor.execute(sql, args)
+        return self.cursor.fetchmany()
+        
 
     async def close(self):
         self.conn.close()

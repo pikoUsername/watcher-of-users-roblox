@@ -47,4 +47,4 @@ class TokenService(ContextInstanceMixin["TokenService"]):
         model_name = self._model_name
 
         await conn.execute(f"CREATE TABLE IF NOT EXISTS {model_name} ("
-                           f"id SERIAL PRIMARY KEY, token TEXT, is_active BOOLEAN DEFAULT true);")
+                           f"id INTEGER PRIMARY KEY AUTOINCREMENT, token TEXT, is_active BOOLEAN DEFAULT true);")

@@ -114,7 +114,7 @@ class UrlHandler(IListener):
         cookies = driver.get_cookies()
         cookies = convert_browser_cookies_to_aiohttp(cookies)
 
-        element = driver.find_element((By.CSS_SELECTOR, "meta[name='user-data']"))
+        element = driver.find_element(By.CSS_SELECTOR, "meta[name='user-data']")
         user_id = element.get_attribute("data-userid")
 
         robux_url = "https://economy.roblox.com/v1/users/{user_id}/currency"

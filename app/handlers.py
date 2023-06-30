@@ -192,7 +192,7 @@ class UrlHandler(IListener):
 
         cost = driver.find_element(By.CLASS_NAME, "text-robux-lg")
         logger.info(f"Cost of gamepass from page: {cost.text}")
-        if purchase_data.price != int(cost.text):
+        if purchase_data.price != int(cost.text.replace(",", "")):
             logger.info("Price is not equal to url's price")
 
             data.update(

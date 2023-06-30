@@ -24,6 +24,7 @@ from app.services.helpers import validate_url
 from app.services.publisher import BasicMessageSender
 from app.schemas import ReturnSignal, StatusCodes, SendError
 from app.schemas import PurchaseData
+from app.services.validators import validate_game_pass_url
 
 
 def auth(browser: Chrome, token: str):
@@ -167,6 +168,13 @@ class UrlHandler(IListener):
             data: dict,
             session: ClientSession
     ) -> None:
+        if not validate_game_pass_url(purchase_data.url):
+            logger.info("Not correct url, denying!")
+            data.update(
+                return_signal=ReturnSignal(status_code=StatusCodes.invalid_data)
+            )
+            return
+
         logger.info(f"Redirecting to {purchase_data.url}")
         driver.get(purchase_data.url)
 

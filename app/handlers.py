@@ -85,6 +85,7 @@ class UrlHandler(IListener):
         auth(driver, token)
         logger.info("Login complete")
 
+        self.token_service = token_service
         self.setupped = True
 
         data.update(driver=driver, session=session)
@@ -201,7 +202,7 @@ class UrlHandler(IListener):
 
             return
 
-        if robux < 5 or int(cost.text) > robux:
+        if robux < 5 or (int(cost.text.replace(",", "")) > robux and robux < 50):
             try:
                 await self.change_token_recursive(driver)
             except RuntimeError:

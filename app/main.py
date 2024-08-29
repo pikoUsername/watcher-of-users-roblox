@@ -57,7 +57,6 @@ async def main():
 
     root_consumer.add_listener(handlers.DataHandler())
     root_consumer.add_listener(handlers.UrlHandler())
-    root_consumer.add_listener(handlers.ReturnSignalHandler())
 
     logger.info("Starting application")
 

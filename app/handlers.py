@@ -91,17 +91,18 @@ class UrlHandler(IListener):
         nicknames = driver.find_elements(by=By.CSS_SELECTOR, value=".avatar-name")
 
         response = []
+        logger.info(logins + nicknames)
 
         for login, nickname in zip(logins, nicknames):
             response.append(
                 SearchResponse(
-                    login=login,
-                    nickname=nickname,
+                    login=login.text,
+                    nickname=nickname.text,
                 )
             )
 
         logger.info(f"collected response up: {response}")
-
+        # пиздец, ладно меня гонят спать, ага sleep time!! давай утром я вечером не смогу
         if settings.debug:
             driver.save_screenshot("screenshot.png")
 
@@ -120,7 +121,8 @@ class UrlHandler(IListener):
             status_code=StatusCodes.success,
             data=response,
         )
-        data.update(return_signal=result)
+
+        publisher.send_message(result.dict())
 
 
 class DataHandler(IListener):
@@ -149,14 +151,3 @@ class DataHandler(IListener):
             raise CancelException
 
         data.update(search_data=pur_data)
-
-
-class ReturnSignalHandler(IListener):
-    def setup(self, *args, **kwargs):
-        pass
-
-    def close(self, *args, **kwargs):
-        pass
-
-    async def __call__(self, publisher: BasicMessageSender, search_data: SearchData, return_signal: ReturnSignal):
-        publisher.send_message(return_signal.dict())

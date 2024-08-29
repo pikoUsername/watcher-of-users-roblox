@@ -3,10 +3,7 @@ from typing import Optional, Dict, Any, List, TYPE_CHECKING
 import sqlite3
 from asyncpg import Pool, Connection, Record
 
-from app.services.abc import BasicDBConnector
-
-if TYPE_CHECKING:
-    from app.config import Settings
+from app.services.interfaces import BasicDBConnector
 
 
 class AsyncpgDBConnector(BasicDBConnector):
@@ -63,7 +60,7 @@ class SQLiteDBConnector(BasicDBConnector):
             self._cursor = self.conn.cursor()
         return self._cursor
 
-    async def execute(self, sql, *args, **kwargs) -> Optional[str]:
+    async def execute(self, sql, *args, **kwargs) -> None :
         self.cursor.execute(sql, args)
         self.conn.commit()
 
@@ -75,7 +72,6 @@ class SQLiteDBConnector(BasicDBConnector):
     async def fetchmany(self, sql, *args, **kwargs) -> List[Dict[str, Any]]:
         self.cursor.execute(sql, args)
         return self.cursor.fetchmany()
-        
 
     async def close(self):
         self.conn.close()

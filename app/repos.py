@@ -1,17 +1,13 @@
 from typing import Sequence, Union, Optional
 
-from app.services.abc import BasicDBConnector
-from app.services.mixins import ContextInstanceMixin
+from app.services.interfaces import BasicDBConnector
 
 
-class TokenService(ContextInstanceMixin["TokenService"]):
+class TokenRepository:
     def __init__(self, conn: BasicDBConnector, model_name: str) -> None:
         self.conn = conn
 
         self._model_name = model_name
-
-        # singleton
-        self.set_current(self)
 
     async def fetch_active_tokens(self, limit: int = 10) -> Union[Sequence[str], str]:
         conn = self.conn
@@ -36,7 +32,7 @@ class TokenService(ContextInstanceMixin["TokenService"]):
             return ""
         return tokens[0]
 
-    async def mark_as_spent(self, token: str) -> None:
+    async def mark_as_inactive(self, token: str) -> None:
         conn = self.conn
         model_name = self._model_name
 
@@ -47,4 +43,4 @@ class TokenService(ContextInstanceMixin["TokenService"]):
         model_name = self._model_name
 
         await conn.execute(f"CREATE TABLE IF NOT EXISTS {model_name} ("
-                           f"id INTEGER PRIMARY KEY AUTOINCREMENT, token TEXT, is_active BOOLEAN DEFAULT true);")
+                           f"id SERIAL PRIMARY KEY, token TEXT, is_active BOOLEAN DEFAULT true);")

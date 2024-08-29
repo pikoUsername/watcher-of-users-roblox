@@ -13,6 +13,7 @@
 Для коммуникации с этим скриптом нужен реббитмкью. Значение канала для доступа: 
 ```
 queue_name="url_queue" 
+
 exchange_key="url"
 routing_key="url_queue"
 exchange_type="direct"
@@ -40,7 +41,7 @@ CREATE TABLE IF NOT EXISTS {model_name_here} (
 {
   "errors": [],  // тип ошибок - list<SendError> 
   "status": 200, // возвращается несколько состояния, см. app/schemas.py StatusCodes   
-  "info": ""  // дополнительная информация 
+  "info": "",  // дополнительная информация
 } 
 ```
 `SendError`: 

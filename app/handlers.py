@@ -1,6 +1,5 @@
 import asyncio
 import json
-import time
 from typing import Optional
 
 import pydantic
@@ -10,34 +9,20 @@ from selenium.common import NoSuchElementException, TimeoutException
 from selenium.webdriver import Chrome
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.wait import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
 
-from app.config import Settings
-from app.services.abc import IListener, BasicDBConnector
+from app.browser import is_authed
+from app.settings import Settings
+from app.services.interfaces import IListener, BasicDBConnector
 from app.services.db import get_db_conn
 from app.services.driver import set_token, convert_browser_cookies_to_aiohttp, get_driver, \
     presence_of_any_text_in_element
-from app.repos import TokenService
+from app.repos import TokenRepository
 from app.consts import ROBLOX_TOKEN_KEY, TOKEN_RECURSIVE_CHECK, ROBLOX_HOME_URL
-from app.services.exceptions import SkipException, CancelException
-from app.services.helpers import validate_url
-from app.services.publisher import BasicMessageSender
+from app.services.exceptions import CancelException
+from app.services.queue.publisher import BasicMessageSender
 from app.schemas import ReturnSignal, StatusCodes, SendError
 from app.schemas import PurchaseData
 from app.services.validators import validate_game_pass_url
-
-
-def auth(browser: Chrome, token: str):
-    """
-    Just sets a token and refreshes the page
-
-    :param browser:
-    :param token:
-    :return:
-    """
-    browser.get(ROBLOX_HOME_URL)
-    set_token(browser, token)  # noqa
-    browser.refresh()
 
 
 def press_agreement_button(browser: Chrome):
@@ -60,44 +45,14 @@ class UrlHandler(IListener):
     def __init__(self) -> None:
         self.config: Optional[Settings] = None
 
-        self.token_service: Optional[TokenService] = None
+        self.token_service: Optional[TokenRepository] = None
         self.setupped = False
 
-    async def setup(self, data: dict, conn: BasicDBConnector, settings: Settings, token_service: TokenService):
-        driver = get_driver(settings)
+    async def setup(self):
+        pass
 
-        logger.info("Driver has been set")
-
-        loop = asyncio.get_event_loop()
-
-        _task = loop.create_task(token_service.fetch_token())
-        token = loop.run_until_complete(_task)
-        if not token:
-            raise ValueError("No tokens available")
-
-        logger.info("First token has been taken")
-
-        cookies = convert_browser_cookies_to_aiohttp(driver.get_cookies())
-
-        session = ClientSession(cookies=cookies)
-
-        logger.info("Logging in")
-        auth(driver, token)
-        logger.info("Login complete")
-
-        self.token_service = token_service
-        self.setupped = True
-
-        data.update(driver=driver, session=session)
-
-    def close(self, driver: Chrome, session):
-        driver.quit()
-
-        loop = asyncio.get_event_loop()
-
-        loop.run_until_complete(session.close())
-
-        logger.info("Closing up...")
+    def close(self):
+        pass
 
     async def get_robuxes(self, driver: Chrome, session: ClientSession) -> int:
         try:
@@ -131,7 +86,7 @@ class UrlHandler(IListener):
 
     async def mark_as_spent(self, driver) -> None:
         token = driver.get_cookie(ROBLOX_TOKEN_KEY)
-        await self.token_service.mark_as_spent(token)
+        await self.token_service.mark_as_inactive(token)
 
     async def change_token(self, driver) -> None:
         # marks the current token as spent
@@ -148,17 +103,9 @@ class UrlHandler(IListener):
         if depth == 0:
             raise RuntimeError("TOKENS CORRUPTED, WAITING FOR ACTIONS")
         await self.change_token(driver)
-        if not self.check_page_for_valid_login(driver):
+        if not is_authed(driver):
             await self.change_token(driver)
         await self.change_token_recursive(driver, depth - 1)
-
-    def check_page_for_valid_login(self, driver: Chrome) -> bool:
-        # finds a signup button, if yes, then it returns False
-        try:
-            driver.find_element(By.CLASS_NAME, "rbx-navbar-signup")
-        except NoSuchElementException:
-            return True
-        return False
 
     async def __call__(
             self,
@@ -233,60 +180,6 @@ class UrlHandler(IListener):
                 status_code=StatusCodes.success,
             )
         data.update(return_signal=_temp)
-
-
-class DBHandler(IListener):
-    async def setup(self, data: dict, settings: Settings):
-        logger.info("Creating database connection...")
-        conn = await get_db_conn(settings.db_dsn, settings.db_type)
-        logger.info("Database conn complete")
-
-        token_service = TokenService.get_current(
-            no_error=True
-        ) or TokenService(conn, settings.db_tokens_table)
-
-        await token_service.create_tokens_table()
-
-        data.update(token_service=token_service, conn=conn)
-
-    async def close(self, conn: BasicDBConnector):
-        await conn.close()
-
-    def __call__(self, *args, **kwargs):
-        pass
-
-
-class PublisherHandler(IListener):
-    async def setup(self, data: dict, settings: Settings) -> None:
-        logger.info("Setting up basicMessageSender")
-
-        publisher = BasicMessageSender(
-            settings.queue_dsn,
-            queue=settings.send_queue_name,
-            exchange=settings.send_queue_exchange_name,
-            routing=settings.send_queue_name,
-        )
-        publisher.connect()
-        logger.info("Connection to publisher has been established")
-
-        data.update(publisher=publisher)
-
-    def close(self, publisher: BasicMessageSender):
-        publisher.close()
-
-    def __call__(self, *args, **kwargs):
-        pass
-
-
-class ErrorHandler(IListener):
-    def setup(self, *args, **kwargs):
-        pass
-
-    def close(self, *args, **kwargs):
-        pass
-
-    def __call__(self, err: Exception):
-        logger.exception(err)
 
 
 class DataHandler(IListener):

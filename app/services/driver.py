@@ -3,13 +3,14 @@ from urllib.parse import urlparse
 
 from loguru import logger
 from selenium.common import StaleElementReferenceException
+from selenium.webdriver.firefox.service import Service as GeckoService
+from selenium.webdriver.remote.webdriver import WebDriver
 from seleniumwire import webdriver
 from selenium.webdriver.chrome.service import Service as ChromeService
-from seleniumwire.webdriver import Chrome
-from webdriver_manager.chrome import ChromeDriverManager
+from webdriver_manager.firefox import GeckoDriverManager
 
 if TYPE_CHECKING:
-    from app.config import Settings
+    from app.settings import Settings
 
 
 def csrf_token_to_request(csrf_token: str, roblox_token: str):
@@ -20,11 +21,11 @@ def csrf_token_to_request(csrf_token: str, roblox_token: str):
     return interceptor
 
 
-def set_token(driver: Chrome, token: str) -> None:
+def set_token(driver: WebDriver, token: str) -> None:
     driver.add_cookie({"name": ".ROBLOSECURITY", "value": token, "domain": ".roblox.com", "secure": True, "httponly": True})
 
 
-def get_driver(settings: "Settings") -> webdriver.Chrome:
+def get_driver(settings: "Settings") -> WebDriver:
     logger.info("Setting up driver")
 
     if settings.browser.lower() == "chrome":
@@ -35,13 +36,13 @@ def get_driver(settings: "Settings") -> webdriver.Chrome:
         opts.add_argument('--disable-gpu')
         opts.add_argument('--ignore-certificate-errors')
         opts.add_argument("--disable-dev-shm-usage")
-        opts.add_argument("--headless")
-        opts.add_argument("--window-size=%s" % settings.window_size)
-        opts.add_argument("--blink-settings=imagesEnabled=false")
+        # opts.add_argument("--headless")
+        # opts.add_argument("--window-size=%s" % settings.window_size)
+        # opts.add_argument("--blink-settings=imagesEnabled=false")
         opts.add_argument('--no-sandbox')
         opts.add_argument("--log-level=3")
 
-        service = ChromeService(ChromeDriverManager(path="./drivers/").install())
+        service = ChromeService(executable_path="./drivers/chromedriver.exe")
 
         driver = webdriver.Chrome(service=service, options=opts)
 
@@ -62,6 +63,16 @@ def get_driver(settings: "Settings") -> webdriver.Chrome:
         logger.info(f"Connecting to {settings.browser_dsn} Remote browser")
 
         driver = webdriver.Remote(command_executor=settings.browser_dsn, options=opts)
+    elif settings.browser.lower() == "firefox" or settings.browser.lower() == "gecko":
+        logger.info("Setting up remote firefox browser")
+
+        opts = webdriver.FirefoxOptions()
+        opts.add_argument("--disable-web-security")
+        agent = settings.user_agent
+        opts.add_argument(agent)
+
+        service = GeckoService(GeckoDriverManager(path="./drivers/").install())
+        driver = webdriver.Firefox(service=service, options=opts)
     else:
         raise NotImplementedError(f"{settings.browser} is not yet implemented")
 
@@ -92,9 +103,9 @@ def presence_of_any_text_in_element(locator):
     """
     def _predicate(driver):
         try:
-            element_text = driver.find_element(*locator).text
-            if element_text != "":
-                return element_text
+            element = driver.find_element(*locator)
+            if element.text != "":
+                return element
             return False
         except StaleElementReferenceException:
             return False

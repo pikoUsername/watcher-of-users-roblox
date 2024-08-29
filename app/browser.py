@@ -34,7 +34,7 @@ def auth(browser: WebDriver, token: str):
 	browser.refresh()
 
 
-async def auth_browser(driver: WebDriver, token_service: TokenRepository) -> None:
+async def auth_browser(driver: WebDriver, token_service: TokenRepository, depth: int = 5) -> None:
 	logger.info("First token has been taken")
 
 	token = await token_service.fetch_token()
@@ -46,10 +46,11 @@ async def auth_browser(driver: WebDriver, token_service: TokenRepository) -> Non
 	logger.info("Logging in")
 	auth(driver, token)
 	if not is_authed(driver):
-		await token_service.mark_as_inactive(token)
+		if depth == 0:
+			await token_service.mark_as_inactive(token)
 
 		logger.warning("Login failed, trying another token!")
 
-		return await auth_browser(driver, token_service)
+		return await auth_browser(driver, token_service, depth - 1)
 
 	logger.info("Login complete")

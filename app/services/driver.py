@@ -67,7 +67,6 @@ def get_driver(settings: "Settings") -> WebDriver:
         logger.info("Setting up remote firefox browser")
 
         opts = webdriver.FirefoxOptions()
-        opts.add_argument("--disable-web-security")
         agent = settings.user_agent
         opts.add_argument(agent)
 

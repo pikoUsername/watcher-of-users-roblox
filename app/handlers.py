@@ -102,7 +102,7 @@ class UrlHandler(IListener):
             )
 
         logger.info(f"collected response up: {response}")
-        # пиздец, ладно меня гонят спать, ага sleep time!! давай утром я вечером не смогу
+
         if settings.debug:
             driver.save_screenshot("screenshot.png")
 

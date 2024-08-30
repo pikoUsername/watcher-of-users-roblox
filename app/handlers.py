@@ -9,11 +9,12 @@ from selenium.common import NoSuchElementException
 from selenium.webdriver import Chrome
 from selenium.webdriver.common.by import By
 from selenium.webdriver.remote.webdriver import WebDriver
+from selenium.webdriver.support.wait import WebDriverWait
 
 from app.browser import is_authed
 from app.settings import Settings
 from app.services.interfaces import IListener
-from app.services.driver import set_token
+from app.services.driver import set_token, presence_of_any_text_in_element
 from app.repos import TokenRepository
 from app.consts import ROBLOX_TOKEN_KEY, TOKEN_RECURSIVE_CHECK
 from app.services.exceptions import CancelException
@@ -87,6 +88,10 @@ class UrlHandler(IListener):
         url = self.form_url(search_data.name)
         driver.get(url)
 
+        WebDriverWait(driver, 5).until(
+            presence_of_any_text_in_element((By.CSS_SELECTOR, ".text-overflow.avatar-card-label.ng-binding"))
+        )
+
         logins = driver.find_elements(by=By.CSS_SELECTOR, value=".text-overflow.avatar-card-label.ng-binding")
         nicknames = driver.find_elements(by=By.CSS_SELECTOR, value=".avatar-name")
 
@@ -123,6 +128,8 @@ class UrlHandler(IListener):
         )
 
         publisher.send_message(result.dict())
+
+        logger.info("Sending result to consumer")
 
 
 class DataHandler(IListener):
